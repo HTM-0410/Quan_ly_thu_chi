@@ -1,0 +1,79 @@
+# See https://dart.dev/guides/get-started-dependency-viewer for Dart-specific ignores.
+
+# Secrets — never commit real .env files
+.env
+.env.*
+!.env.example
+apps/mobile/.env
+apps/mobile/.env.*
+!apps/mobile/.env.example
+supabase/.env
+supabase/.env.*
+!supabase/.env.example
+supabase/functions/.env
+supabase/functions/.env.*
+!supabase/functions/.env.example
+
+# Build outputs
+web/dist/
+apps/mobile/build/
+
+# Dart / Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.flutter-plugins
+.pub-cache/
+.pub/
+pubspec.lock
+**/*.gr.dart
+**/*.g.dart
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Flutter specific
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/flutter_export_environment.sh
+**/macos/Pods/
+**/macos/Flutter/ephemeral/
+**/windows/flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/*.jks
+**/*.p8
+**/*.p12
+**/*.key
+**/*.keystore
+local.properties
+
+# Android
+**/android/.gradle/
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/key.properties
+*.jks
+
+# Coverage
+coverage/
+*.lcov
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+supabase/.env.production

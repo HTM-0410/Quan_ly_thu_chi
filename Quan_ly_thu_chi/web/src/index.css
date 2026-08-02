@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(184, 69, 31, 0.18);
+  color: inherit;
+}
+
+.tabular-nums,
+.font-mono {
+  font-feature-settings: 'tnum' 1, 'lnum' 1, 'cv11';
+}
+
+/**
+ * Sans-serif tabular numbers for big money displays.
+ * Dùng JetBrains Mono — không có descenders/serifs → không "chân" dù nhỏ.
+ * Headings vẫn dùng Fraunces qua .h-display.
+ */
+.num {
+  font-family: '"JetBrains Mono"', ui-monospace, monospace;
+  font-feature-settings: 'tnum' 1, 'lnum' 1, 'ss01' 1, 'ss02' 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid theme('colors.brand.500');
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-btn px-3.5 py-2 text-sm font-medium
+      transition-all duration-150
+      disabled:opacity-50 disabled:cursor-not-allowed
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2
+      focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-white shadow-sm hover:bg-brand-600 active:bg-brand-700;
+  }
+  .btn-secondary {
+    @apply btn bg-surface-raised text-ink-800 border border-ink-200 shadow-sm
+      hover:bg-ink-50 active:bg-ink-100
+      dark:bg-surface-dark-raised dark:text-inkDark-900 dark:border-ink-700 dark:hover:bg-ink-800;
+  }
+  .btn-ghost {
+    @apply btn text-ink-600 hover:bg-ink-50 hover:text-ink-900
+      dark:text-inkDark-500 dark:hover:bg-ink-800 dark:hover:text-inkDark-900;
+  }
+  .btn-danger {
+    @apply btn bg-err-50 text-err-600 border border-err-100 hover:bg-err-100 hover:text-err-700
+      dark:bg-err-700/15 dark:text-err-500 dark:border-err-700/40 dark:hover:bg-err-700/25;
+  }
+  .input {
+    @apply w-full rounded-btn border border-ink-200 bg-surface-raised px-3 py-2 text-sm text-ink-900
+      outline-none transition placeholder:text-ink-400
+      focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15
+      dark:bg-surface-dark-raised dark:border-ink-700 dark:text-inkDark-900 dark:placeholder:text-inkDark-400
+      dark:focus:border-brand-400;
+  }
+  .label {
+    @apply block text-sm font-medium text-ink-800 mb-1.5 dark:text-inkDark-900;
+  }
+  .card {
+    @apply rounded-card bg-surface-raised border border-ink-200 shadow-card
+      dark:bg-surface-dark-raised dark:border-ink-800;
+  }
+  .card-flat {
+    @apply rounded-card bg-surface-raised border border-ink-200
+      dark:bg-surface-dark-raised dark:border-ink-800;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-pill px-2.5 py-0.5 text-xs font-medium;
+  }
+  .h-display {
+    @apply font-display tracking-tight;
+  }
+  .divider {
+    @apply h-px bg-ink-100 dark:bg-ink-800;
+  }
+}
+
+@layer base {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(26, 22, 18, 0.15);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(26, 22, 18, 0.25);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background: rgba(244, 237, 224, 0.12);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(244, 237, 224, 0.2);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+}
