@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { TrendingDown, TrendingUp } from 'lucide-react';
+import { CalendarRange, TrendingDown, TrendingUp } from 'lucide-react';
 import { ErrorState, Skeleton } from '../components/EmptyState';
 import { MonthHeatmap } from '../components/MonthHeatmap';
 import { DayDetail } from '../components/DayDetail';
@@ -34,18 +34,193 @@ interface MonthBucket {
   label: string;
   income: number;
   expense: number;
+  /** period start (YYYY-MM-DD) dùng để sort ổn định. */
+  start: string;
+}
+
+// ============================================================
+// Khoảng thời gian (preset + custom)
+// ============================================================
+
+type RangePreset = 'current' | 'month' | 'quarter' | 'year' | 'custom';
+
+interface RangeState {
+  preset: RangePreset;
+  start: string; // YYYY-MM-DD
+  end: string;   // YYYY-MM-DD (inclusive)
+}
+
+const PRESET_LABELS: Record<RangePreset, string> = {
+  current: 'Hiện tại',
+  month: 'Tháng',
+  quarter: 'Quý',
+  year: 'Năm',
+  custom: 'Tùy chỉnh',
+};
+
+/** Pad 2 chữ số. */
+const pad2 = (n: number) => String(n).padStart(2, '0');
+/** Build YYYY-MM-DD từ local Date. */
+const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+/** Parse YYYY-MM-DD thành local Date. */
+const parseYmd = (s: string) => {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+};
+
+/** Ngày đầu tiên của tháng chứa `d`. */
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+/** Ngày cuối cùng của tháng chứa `d`. */
+function endOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+/** Tháng trước đó N tháng. */
+function addMonths(d: Date, n: number) {
+  return new Date(d.getFullYear(), d.getMonth() + n, 1);
+}
+/** Quý của `d` (Q1=0..Q4=3). */
+function quarterIndex(d: Date) {
+  return Math.floor(d.getMonth() / 3);
 }
 
 /**
- * Parse DATE string "YYYY-MM-DD" từ Postgres (đã là local date theo user tz)
- * và build label "MM/YY". Tránh new Date("YYYY-MM-DD") vì sẽ parse thành
- * UTC midnight → có thể lệch 1 ngày khi user ở UTC+7.
+ * Tính [start, end] từ preset, neo theo `anchor` (mặc định = tháng hiện tại).
+ * - current: tháng hiện tại
+ * - month:   12 tháng gần nhất, neo về cùng tháng
+ * - quarter: 4 quý gần nhất, neo về cùng quý
+ * - year:    5 năm gần nhất (theo năm dương lịch)
+ * - custom:  dùng start/end đã chọn
  */
-function monthLabelFromDateString(dateStr: string): string {
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return dateStr;
-  // parts[0]=YYYY, parts[1]=MM, parts[2]=DD — dùng parts[0] cho year
-  return `${parts[1]}/${parts[0].slice(-2)}`;
+function deriveRange(preset: RangePreset, anchor: Date, customStart: string, customEnd: string): RangeState {
+  const today = new Date();
+  switch (preset) {
+    case 'current':
+      return { preset, start: ymd(startOfMonth(today)), end: ymd(endOfMonth(today)) };
+    case 'month': {
+      const end = endOfMonth(anchor);
+      const start = startOfMonth(addMonths(anchor, -11));
+      return { preset, start: ymd(start), end: ymd(end) };
+    }
+    case 'quarter': {
+      // 4 quý gần nhất tính tới quý hiện tại.
+      const qNow = quarterIndex(today);
+      const startQ = new Date(today.getFullYear(), qNow * 3, 1);
+      const endQ = new Date(today.getFullYear(), qNow * 3 + 3, 0);
+      const start = new Date(startQ.getFullYear(), startQ.getMonth() - 9, 1);
+      return { preset, start: ymd(start), end: ymd(endQ) };
+    }
+    case 'year': {
+      const y = today.getFullYear();
+      return { preset, start: `${y - 4}-01-01`, end: `${y}-12-31` };
+    }
+    case 'custom': {
+      // Đảm bảo start <= end, fallback về tháng hiện tại nếu invalid.
+      const s = parseYmd(customStart);
+      const e = parseYmd(customEnd);
+      if (isNaN(s.getTime()) || isNaN(e.getTime()) || s > e) {
+        return { preset, start: ymd(startOfMonth(today)), end: ymd(endOfMonth(today)) };
+      }
+      return { preset, start: ymd(s), end: ymd(e) };
+    }
+  }
+}
+
+/**
+ * Chia range thành các bucket hiển thị cho biểu đồ cột, phù hợp với preset:
+ * - month:   bucket theo tháng → 12 cột
+ * - quarter: bucket theo quý → 4 cột
+ * - year:    bucket theo năm → 5 cột
+ * - current/custom: bucket theo ngày → chỉ với custom (current: 1 tháng → 1 bucket)
+ *
+ * Trả về label từng bucket + khoảng (start, end) YYYY-MM-DD cho từng bucket
+ * để gọi getTransactionsSummary tuần tự.
+ */
+function bucketRange(range: RangeState): { label: string; start: string; end: string }[] {
+  const buckets: { label: string; start: string; end: string }[] = [];
+  const s = parseYmd(range.start);
+  const e = parseYmd(range.end);
+
+  if (range.preset === 'current') {
+    buckets.push({ label: 'Tháng này', start: range.start, end: range.end });
+    return buckets;
+  }
+
+  if (range.preset === 'custom') {
+    // Ước lượng số ngày → nếu > 31 thì bucket theo tháng, ngược lại theo ngày.
+    const days = Math.round((e.getTime() - s.getTime()) / 86_400_000) + 1;
+    if (days <= 31) {
+      const cur = new Date(s);
+      while (cur <= e) {
+        const ds = ymd(cur);
+        const de = ymd(cur);
+        buckets.push({
+          label: `${pad2(cur.getDate())}/${pad2(cur.getMonth() + 1)}`,
+          start: ds,
+          end: de,
+        });
+        cur.setDate(cur.getDate() + 1);
+      }
+    } else {
+      const cur = startOfMonth(s);
+      while (cur <= e) {
+        const monthStart = ymd(cur);
+        const monthEnd = ymd(endOfMonth(cur));
+        // Chỉ thêm nếu overlap với range
+        if (parseYmd(monthEnd) >= s && parseYmd(monthStart) <= e) {
+          buckets.push({
+            label: `${pad2(cur.getMonth() + 1)}/${cur.getFullYear()}`,
+            start: monthStart > range.start ? monthStart : range.start,
+            end: monthEnd < range.end ? monthEnd : range.end,
+          });
+        }
+        cur.setMonth(cur.getMonth() + 1);
+      }
+    }
+    return buckets;
+  }
+
+  if (range.preset === 'month') {
+    const cur = startOfMonth(s);
+    while (cur <= e) {
+      buckets.push({
+        label: `${pad2(cur.getMonth() + 1)}/${String(cur.getFullYear()).slice(-2)}`,
+        start: ymd(cur),
+        end: ymd(endOfMonth(cur)),
+      });
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    return buckets;
+  }
+
+  if (range.preset === 'quarter') {
+    const cur = new Date(s.getFullYear(), Math.floor(s.getMonth() / 3) * 3, 1);
+    while (cur <= e) {
+      const q = Math.floor(cur.getMonth() / 3) + 1;
+      const qEnd = new Date(cur.getFullYear(), cur.getMonth() + 3, 0);
+      buckets.push({
+        label: `Q${q}/${cur.getFullYear()}`,
+        start: ymd(cur),
+        end: ymd(qEnd),
+      });
+      cur.setMonth(cur.getMonth() + 3);
+    }
+    return buckets;
+  }
+
+  if (range.preset === 'year') {
+    for (let y = s.getFullYear(); y <= e.getFullYear(); y++) {
+      buckets.push({
+        label: String(y),
+        start: `${y}-01-01`,
+        end: `${y}-12-31`,
+      });
+    }
+    return buckets;
+  }
+
+  return buckets;
 }
 
 const COLORS = ['#1E88E5', '#43A047', '#E53935', '#FB8C00', '#8E24AA', '#00897B', '#5E35B1', '#3949AB'];
@@ -53,9 +228,18 @@ const COLORS = ['#1E88E5', '#43A047', '#E53935', '#FB8C00', '#8E24AA', '#00897B'
 export function ReportsPage() {
   useDocumentTitle('Báo cáo');
   const { profile } = useAuth();
-  // User tz từ profile (set ở Settings), fallback browser tz, cuối cùng UTC.
   const timezone =
     profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+  const today = useMemo(() => new Date(), []);
+  const [rangePreset, setRangePreset] = useState<RangePreset>('month');
+  const [customStart, setCustomStart] = useState<string>('');
+  const [customEnd, setCustomEnd] = useState<string>('');
+  const range: RangeState = useMemo(
+    () => deriveRange(rangePreset, today, customStart, customEnd),
+    [rangePreset, today, customStart, customEnd],
+  );
+
   const [income, setIncome] = useState<number>(0);
   const [expense, setExpense] = useState<number>(0);
   const [history, setHistory] = useState<MonthBucket[]>([]);
@@ -78,51 +262,34 @@ export function ReportsPage() {
     | null
   >(null);
 
+  /**
+   * Load thu/chi theo range đang chọn.
+   * - Gọi getTransactionsSummary cho cả range (income/expense cards).
+   * - Chia range thành bucket theo preset rồi gọi getTransactionsSummary
+   *   cho từng bucket (history cho biểu đồ cột).
+   */
   async function load() {
     setLoading(true);
     setErr(null);
     try {
-      // Lấy tháng hiện tại từ browser Date (không phụ thuộc timezone)
-      const now = new Date();
-      const year = now.getFullYear();
-      const monthIndex = now.getMonth();
-      const { start: monthStartUtc, end: monthEndUtc } = monthRangeInTz(
-        year,
-        monthIndex,
-        timezone,
-      );
-      // YYYY-MM-DD trực tiếp từ local date components — tránh shift do toISOString().
-      const startDate = toLocalDateString(new Date(year, monthIndex, 1));
-      const endDate = toLocalDateString(new Date(year, monthIndex + 1, 0));
-
-      const [historyRows, sum, cats, txs] = await Promise.all([
-        getMonthlyHistory(6, timezone),
+      const [sum, cats, txs, hist] = await Promise.all([
         getTransactionsSummary({
-          start_date: startDate,
-          end_date: endDate,
+          start_date: range.start,
+          end_date: range.end,
         }),
         listCategories(),
         listTransactions({
-          from: monthStartUtc.toISOString(),
-          to: monthEndUtc.toISOString(),
+          from: monthRangeInTz(today.getFullYear(), today.getMonth(), timezone).start.toISOString(),
+          to: monthRangeInTz(today.getFullYear(), today.getMonth(), timezone).end.toISOString(),
           type: 'expense',
           limit: 500,
         }),
+        loadHistory(range),
       ]);
 
       setIncome(Number(sum?.total_income ?? 0));
       setExpense(Number(sum?.total_expense ?? 0));
-      setHistory(
-        historyRows.map((row: {
-          period_start: string;
-          total_income: number;
-          total_expense: number;
-        }) => ({
-          label: monthLabelFromDateString(row.period_start),
-          income: row.total_income,
-          expense: row.total_expense,
-        })),
-      );
+      setHistory(hist);
       setCategories(cats);
       const catById = new Map<string, Category>(cats.map((c: Category) => [c.id, c]));
       const totals = new Map<string, number>();
@@ -152,11 +319,42 @@ export function ReportsPage() {
     }
   }
 
+  /**
+   * Chia range thành bucket và gọi getTransactionsSummary cho mỗi bucket.
+   * Trả về MonthBucket[] sẵn để binding vào BarChart.
+   */
+  async function loadHistory(range: RangeState): Promise<MonthBucket[]> {
+    const buckets = bucketRange(range);
+    if (buckets.length === 0) return [];
+
+    // Parallel hóa nhưng giới hạn concurrency=6 để tránh spam RPC.
+    const out: MonthBucket[] = [];
+    const concurrency = 6;
+    for (let i = 0; i < buckets.length; i += concurrency) {
+      const slice = buckets.slice(i, i + concurrency);
+      const rows = await Promise.all(
+        slice.map(async (b) => {
+          const row = await getTransactionsSummary({
+            start_date: b.start,
+            end_date: b.end,
+          });
+          return {
+            label: b.label,
+            start: b.start,
+            income: Number(row?.total_income ?? 0),
+            expense: Number(row?.total_expense ?? 0),
+          };
+        }),
+      );
+      out.push(...rows);
+    }
+    return out;
+  }
+
   async function loadHeatmap() {
     const year = heatmapAnchor.getFullYear();
     const monthIndex = heatmapAnchor.getMonth();
     const { start, end } = monthRangeInTz(year, monthIndex, timezone);
-    console.log('[DEBUG] loadHeatmap', { year, monthIndex, timezone, from: start.toISOString(), to: end.toISOString() });
     setHeatmapLoading(true);
     try {
       const txs: Transaction[] = await listTransactions({
@@ -164,14 +362,11 @@ export function ReportsPage() {
         to: end.toISOString(),
         limit: 1000,
       });
-      console.log('[DEBUG] loadHeatmap got txs', { count: txs.length, first3: txs.slice(0, 3).map(t => ({ id: t.id, type: t.type, occurred_at: t.occurred_at, amount_minor: t.amount_minor })) });
       const grouped = groupByDay(txs, timezone);
       const indexed = indexByDay(txs, timezone);
-      console.log('[DEBUG] loadHeatmap grouped', { size: grouped.size, keys: Array.from(grouped.keys()).slice(0, 5) });
       setHeatmapData(grouped);
       setHeatmapTxs(indexed);
     } catch (e) {
-      console.error('[DEBUG] loadHeatmap error', e);
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setHeatmapLoading(false);
@@ -181,12 +376,39 @@ export function ReportsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timezone]);
+  }, [timezone, range.start, range.end, range.preset]);
 
   useEffect(() => {
     loadHeatmap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heatmapAnchor, timezone]);
+
+  // Khi user chọn preset "custom" mà chưa có giá trị, mặc định = range hiện tại.
+  function handlePresetChange(p: RangePreset) {
+    setRangePreset(p);
+    if (p === 'custom') {
+      if (!customStart || !customEnd) {
+        const r = deriveRange('current', today, '', '');
+        setCustomStart(r.start);
+        setCustomEnd(r.end);
+      }
+    }
+  }
+
+  const sectionTitle = useMemo(() => {
+    switch (range.preset) {
+      case 'current':
+        return 'Tình hình chi tháng này';
+      case 'month':
+        return 'Tình hình chi 12 tháng gần nhất';
+      case 'quarter':
+        return 'Tình hình chi 4 quý gần nhất';
+      case 'year':
+        return 'Tình hình chi 5 năm gần nhất';
+      case 'custom':
+        return `Tình hình chi ${range.start} → ${range.end}`;
+    }
+  }, [range]);
 
   return (
     <div className="space-y-8">
@@ -204,12 +426,68 @@ export function ReportsPage() {
 
       {err && <ErrorState message={err} onRetry={load} />}
 
+      {/* Range selector */}
+      <div className="card overflow-hidden">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+          <div className="inline-flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.16em] text-ink-500 dark:text-inkDark-500">
+            <CalendarRange size={14} strokeWidth={1.75} />
+            Khoảng thời gian
+          </div>
+          <div className="flex flex-wrap gap-1 rounded-card border border-ink-200 bg-surface-sunken p-1 dark:border-ink-800 dark:bg-surface-dark-sunken">
+            {(Object.keys(PRESET_LABELS) as RangePreset[]).map(p => {
+              const active = p === rangePreset;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => handlePresetChange(p)}
+                  className={[
+                    'rounded-button px-3 py-1.5 text-xs font-medium transition',
+                    active
+                      ? 'bg-brand-600 text-white shadow-sm dark:bg-brand-500'
+                      : 'text-ink-600 hover:bg-surface dark:text-inkDark-500 dark:hover:bg-surface-dark',
+                  ].join(' ')}
+                  aria-pressed={active}
+                >
+                  {PRESET_LABELS[p]}
+                </button>
+              );
+            })}
+          </div>
+          {range.preset === 'custom' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-ink-500 dark:text-inkDark-500">
+                Từ
+                <input
+                  type="date"
+                  value={customStart}
+                  max={customEnd || undefined}
+                  onChange={e => setCustomStart(e.target.value)}
+                  className="rounded-button border border-ink-200 bg-surface px-2 py-1 text-xs text-ink-900 dark:border-ink-800 dark:bg-surface-dark dark:text-inkDark-900"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-ink-500 dark:text-inkDark-500">
+                Đến
+                <input
+                  type="date"
+                  value={customEnd}
+                  min={customStart || undefined}
+                  max={toLocalDateString(today)}
+                  onChange={e => setCustomEnd(e.target.value)}
+                  className="rounded-button border border-ink-200 bg-surface px-2 py-1 text-xs text-ink-900 dark:border-ink-800 dark:bg-surface-dark dark:text-inkDark-900"
+                />
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="card relative overflow-hidden p-5">
           <div className="flex items-start justify-between">
             <div>
               <div className="text-2xs font-semibold uppercase tracking-[0.16em] text-ok-600 dark:text-ok-500">
-                Thu nhập tháng này
+                Thu nhập
               </div>
               {loading ? (
                 <Skeleton className="mt-2 h-8 w-40" />
@@ -228,7 +506,7 @@ export function ReportsPage() {
           <div className="flex items-start justify-between">
             <div>
               <div className="text-2xs font-semibold uppercase tracking-[0.16em] text-err-600 dark:text-err-500">
-                Chi tiêu tháng này
+                Chi tiêu
               </div>
               {loading ? (
                 <Skeleton className="mt-2 h-8 w-40" />
@@ -248,12 +526,16 @@ export function ReportsPage() {
       <section className="card overflow-hidden">
         <div className="border-b border-ink-100 px-5 py-3.5 dark:border-ink-800">
           <h2 className="h-display text-base font-semibold text-ink-900 dark:text-inkDark-900">
-            6 tháng gần nhất
+            {sectionTitle}
           </h2>
         </div>
         <div className="p-5">
           {loading ? (
             <Skeleton className="h-72" />
+          ) : history.length === 0 ? (
+            <div className="rounded-card border border-dashed border-ink-200 bg-surface-sunken px-6 py-10 text-center text-sm text-ink-500 dark:border-ink-800 dark:bg-surface-dark-sunken dark:text-inkDark-500">
+              Chưa có dữ liệu trong khoảng này.
+            </div>
           ) : (
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
