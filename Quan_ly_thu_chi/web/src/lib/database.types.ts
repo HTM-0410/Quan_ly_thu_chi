@@ -10,6 +10,11 @@ import type {
   BankConnection,
   BankAccount,
   BankEvent,
+  Person,
+  Debt,
+  DebtPayment,
+  Bill,
+  BillItem,
 } from './domain';
 
 // ============================================================
@@ -52,6 +57,17 @@ export interface Database {
       profiles: TableShape<Profile>;
       financial_accounts: TableShape<FinancialAccount>;
       categories: TableShape<Category>;
+      global_categories: TableShape<{
+        id: string;
+        name: string;
+        kind: 'income' | 'expense' | 'both';
+        icon: string | null;
+        color: string | null;
+        sort_order: number;
+        is_active: boolean;
+        created_at: string;
+        updated_at: string;
+      }>;
       transactions: TableShape<Transaction>;
       budgets: TableShape<Budget>;
       budget_categories: TableShape<{ budget_id: string; category_id: string }>;
@@ -70,6 +86,11 @@ export interface Database {
         metadata: Record<string, unknown>;
         created_at: string;
       }>;
+      people: TableShape<Person>;
+      debts: TableShape<Debt>;
+      debt_payments: TableShape<DebtPayment>;
+      bills: TableShape<Bill>;
+      bill_items: TableShape<BillItem>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -141,6 +162,97 @@ export interface Database {
         { p_up_to?: string; p_max_rules?: number },
         number
       >;
+      update_transaction: RpcScalar<
+        {
+          p_transaction_id: string;
+          p_type?: 'income' | 'expense' | 'refund' | null;
+          p_account_id?: string | null;
+          p_amount_minor?: number | null;
+          p_occurred_at?: string | null;
+          p_category_id?: string | null;
+          p_clear_category?: boolean;
+          p_payee?: string | null;
+          p_note?: string | null;
+        },
+        void
+      >;
+      adjust_account_balance: RpcScalar<
+        {
+          p_account_id: string;
+          p_target_balance_minor: number;
+          p_note?: string | null;
+        },
+        number
+      >;
+      // People & Debts
+      get_people: RpcSetof<Record<string, never>, Person>;
+      create_person: RpcScalar<
+        { p_name: string; p_phone?: string | null },
+        Person
+      >;
+      delete_person: RpcScalar<{ p_id: string }, boolean>;
+      get_debts: RpcSetof<{ p_status?: string | null }, Debt>;
+      get_debt_payments: RpcSetof<{ p_debt_id: string }, DebtPayment>;
+      create_debt: RpcScalar<
+        {
+          p_person_id: string;
+          p_type: 'lend' | 'borrow';
+          p_original_amount: number;
+          p_notes?: string | null;
+        },
+        Debt
+      >;
+      delete_debt: RpcScalar<{ p_id: string }, boolean>;
+      add_debt_payment: RpcScalar<
+        {
+          p_debt_id: string;
+          p_amount: number;
+          p_payment_date?: string | null;
+          p_note?: string | null;
+        },
+        DebtPayment
+      >;
+      mark_debt_paid: RpcScalar<{ p_id: string }, void>;
+      get_debt_summary: RpcSetof<Record<string, never>, { metric: string; amount: number; count: number }>;
+      // Bills
+      get_bill_with_items: RpcScalar<{ p_transaction_id: string }, { bill: Bill; items: BillItem[] } | null>;
+      create_bill_with_items: RpcScalar<
+        {
+          p_transaction_id: string;
+          p_channel_type: 'online' | 'offline';
+          p_online_marketplace?: 'shopee' | 'lazada' | 'tiktok_shop' | 'other' | null;
+          p_online_marketplace_other?: string | null;
+          p_store_name?: string | null;
+          p_declared_total_minor: number;
+          p_items: Array<{
+            product_name: string;
+            quantity: number;
+            unit_price_minor: number;
+            line_total_minor: number;
+            note?: string | null;
+          }>;
+        },
+        string
+      >;
+      update_bill_with_items: RpcScalar<
+        {
+          p_bill_id: string;
+          p_channel_type: 'online' | 'offline';
+          p_online_marketplace?: 'shopee' | 'lazada' | 'tiktok_shop' | 'other' | null;
+          p_online_marketplace_other?: string | null;
+          p_store_name?: string | null;
+          p_declared_total_minor: number;
+          p_items: Array<{
+            product_name: string;
+            quantity: number;
+            unit_price_minor: number;
+            line_total_minor: number;
+            note?: string | null;
+          }>;
+        },
+        string
+      >;
+      delete_bill: RpcScalar<{ p_bill_id: string }, boolean>;
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

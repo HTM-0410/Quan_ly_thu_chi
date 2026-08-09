@@ -22,6 +22,7 @@ import {
   listTransactions,
 } from '../lib/api';
 import { formatDateTime, formatVND } from '../lib/format';
+import { resolveCategory } from '../lib/categoryResolve';
 import type { Category, FinancialAccount, Transaction } from '../lib/types';
 import {
   ACCOUNT_TYPE_LABEL,
@@ -252,7 +253,7 @@ export function DashboardPage() {
           ) : (
             <ul className="divide-y divide-ink-100 dark:divide-ink-800">
               {recent.slice(0, 6).map(t => {
-                const cat = t.category_id ? categoryById.get(t.category_id) : undefined;
+                const cat = resolveCategory(categoryById, t);
                 const isVoid = t.status === 'voided';
                 const accent =
                   t.type === 'income' ? 'ok' : t.type === 'expense' ? 'err' : 'brand';

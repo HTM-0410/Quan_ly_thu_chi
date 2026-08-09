@@ -1,0 +1,12 @@
+{
+  "store_name": "Co.opmart Nguyễn Kiệm",
+  "purchased_at": "2026-08-02 14:30",
+  "items": [
+    { "name": "Sữa tươi Vinamilk 1L", "quantity": 2, "unit_price": 35000, "line_total": 70000, "note": null },
+    { "name": "Bánh mì sandwich", "quantity": 1, "unit_price": 25000, "line_total": 25000, "note": null },
+    { "name": "Nước ngọt Pepsi 1.5L", "quantity": 3, "unit_price": 15000, "line_total": 45000, "note": null }
+  ],
+  "total": 140000,
+  "image_quality": "good",
+  "notes": null
+}

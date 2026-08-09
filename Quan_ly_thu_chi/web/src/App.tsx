@@ -16,6 +16,8 @@ import { BudgetsPage } from './pages/BudgetsPage';
 import { RecurringPage } from './pages/RecurringPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { PeoplePage } from './pages/PeoplePage';
+import { DebtsPage } from './pages/DebtsPage';
 
 export default function App() {
   return (
@@ -38,6 +40,8 @@ export default function App() {
                   <Route path="/recurring" element={<RecurringPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/reports" element={<ReportsPage />} />
+                  <Route path="/people" element={<PeoplePage />} />
+                  <Route path="/debts" element={<DebtsPage />} />
                 </Route>
               </Route>
               <Route path="*" element={<Navigate to="/dashboard" replace />} />

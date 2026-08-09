@@ -2,13 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { APP_ENV } from '../lib/config';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { Logo } from '../components/Logo';
-
-const DEMO_EMAIL = 'demo@quanlythuchi.local';
-const DEMO_PASSWORD = 'Demo@2026!';
-const SHOW_DEMO_HINT = APP_ENV !== 'production';
 
 export function LoginPage() {
   useDocumentTitle('Đăng nhập');
@@ -24,11 +19,6 @@ export function LoginPage() {
   if (session) {
     const target = (loc.state?.from as unknown as { pathname?: string })?.pathname ?? '/dashboard';
     return <Navigate to={target} replace />;
-  }
-
-  function fillDemo() {
-    setEmail(DEMO_EMAIL);
-    setPassword(DEMO_PASSWORD);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -125,28 +115,6 @@ export function LoginPage() {
                 </>
               )}
             </button>
-
-            {SHOW_DEMO_HINT && (
-              <div className="rounded-card bg-surface-sunken px-3 py-2.5 text-xs text-ink-600 space-y-1 dark:bg-surface-dark-sunken dark:text-inkDark-500">
-                <div className="flex items-center gap-1.5 font-medium text-ink-800 dark:text-inkDark-900">
-                  <Sparkles size={12} />
-                  Tài khoản demo (chỉ dev)
-                </div>
-                <div>
-                  Email: <code className="font-mono">{DEMO_EMAIL}</code>
-                </div>
-                <div>
-                  Mật khẩu: <code className="font-mono">{DEMO_PASSWORD}</code>
-                </div>
-                <button
-                  type="button"
-                  onClick={fillDemo}
-                  className="mt-1 inline-flex items-center gap-1 font-medium text-brand-600 hover:underline dark:text-brand-400"
-                >
-                  Điền nhanh <ArrowRight size={12} />
-                </button>
-              </div>
-            )}
 
             <div className="text-center text-sm text-ink-600 dark:text-inkDark-500">
               Chưa có tài khoản?{' '}

@@ -4,11 +4,13 @@ import {
   ArrowLeftRight,
   ArrowUpCircle,
   Camera,
+  Info,
   Pencil,
   Plus,
   Receipt,
   RefreshCcw,
   RotateCcw,
+  Users,
   X as XIcon,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -18,20 +20,30 @@ import { EmptyState, ErrorState, Skeleton } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
 import { CategoryIcon } from '../components/CategoryIcon';
 import { AccountIcon } from '../components/AccountIcon';
+import { ColumnFilterTrigger } from '../components/ColumnFilter';
 import { useToast } from '../components/Toast';
 import { VNDInput } from '../components/VNDInput';
 import { ReceiptImportModal } from '../components/ocr/ReceiptImportModal';
+import { BillBadge } from '../components/bill/BillBadge';
+import { BillOcrModal } from '../components/bill/BillOcrModal';
+import { BillDetailModal } from '../components/bill/BillDetailModal';
 import { useConfirm } from '../hooks/useConfirm';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 import {
+  addDebtPayment,
   createManualTransaction,
   createTransfer,
+  getBillWithItems,
+  getDebtWithPayments,
   getTransactionAccountId,
   listAccounts,
   listCategories,
   listTransactions,
   updateTransaction,
   voidTransaction,
+  getBillSummariesForTransactions,
+  type BillWithItems,
+  type BillSummary,
 } from '../lib/api';
 import {
   formatDateTime,
@@ -40,10 +52,19 @@ import {
   toLocalDateTimeInput,
 } from '../lib/format';
 import { TRANSACTION_TYPE_LABEL } from '../lib/labels';
-import type { Category, FinancialAccount, Transaction } from '../lib/types';
+import { resolveCategory, categoryKey } from '../lib/categoryResolve';
+import type { Category, Debt, FinancialAccount, Transaction } from '../lib/types';
 
 type Tab = 'all' | 'income' | 'expense' | 'transfer';
 type FormMode = 'manual' | 'transfer' | 'ocr';
+
+/** Tên danh mục "Mua sắm" được seed mặc định trong seed_default_categories. */
+const SHOPPING_CATEGORY_NAME = 'Mua sắm';
+
+/** True nếu category là "Mua sắm" (case-insensitive, trim). */
+function isShoppingCategory(cat: { name: string } | null | undefined): boolean {
+  return !!cat && cat.name.trim().toLowerCase() === SHOPPING_CATEGORY_NAME.toLowerCase();
+}
 
 export function TransactionsPage() {
   useDocumentTitle('Giao dịch');
@@ -54,11 +75,56 @@ export function TransactionsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [billMap, setBillMap] = useState<Map<string, BillSummary>>(new Map());
+  /** Bill đang xem (read-only modal). Null = đóng. */
+  const [billDetailTx, setBillDetailTx] = useState<Transaction | null>(null);
+  /** Bill state dùng chung cho ManualTransactionModal + BillDetailModal.Sửa */
+  const [bill, setBill] = useState<BillWithItems | null>(null);
+  const [billModalOpen, setBillModalOpen] = useState(false);
+  /** Refresh billMap sau khi xoá/sửa bill để ẩn/hiện nút Info. */
+  const refreshBillMap = async () => {
+    const txIds = items.map(t => t.id).filter(Boolean);
+    try {
+      const map = await getBillSummariesForTransactions(txIds);
+      setBillMap(map);
+    } catch {
+      // ignore
+    }
+  };
   const [filter, setFilter] = useState<Tab>('all');
   const [openForm, setOpenForm] = useState<FormMode | null>(null);
   const [editTarget, setEditTarget] = useState<
     { tx: Transaction; accountId: string } | null
   >(null);
+
+  // ==============================
+  // Column filters (popover funnel per column)
+  // ==============================
+  const [payeeFilter, setPayeeFilter] = useState<string[]>([]);
+  const [accountFilter, setAccountFilter] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [datePreset, setDatePreset] = useState<string | null>(null);
+  const [amountMin, setAmountMin] = useState<number | null>(null);
+  const [amountMax, setAmountMax] = useState<number | null>(null);
+
+  function toggleIn(setter: React.Dispatch<React.SetStateAction<string[]>>, value: string) {
+    setter(prev => (prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]));
+  }
+  function resetAllColumnFilters() {
+    setPayeeFilter([]);
+    setAccountFilter([]);
+    setCategoryFilter([]);
+    setDatePreset(null);
+    setAmountMin(null);
+    setAmountMax(null);
+  }
+  const columnFilterCount =
+    payeeFilter.length +
+    accountFilter.length +
+    categoryFilter.length +
+    (datePreset ? 1 : 0) +
+    (amountMin != null ? 1 : 0) +
+    (amountMax != null ? 1 : 0);
 
   async function load() {
     setLoading(true);
@@ -72,6 +138,15 @@ export function TransactionsPage() {
       setItems(txs);
       setAccounts(accs);
       setCategories(cats);
+      // Fetch bill summaries cho tất cả tx ids (chỉ check có bill hay không).
+      const txIds = txs.map(t => t.id).filter(Boolean);
+      try {
+        const map = await getBillSummariesForTransactions(txIds);
+        setBillMap(map);
+      } catch {
+        // Không block UI nếu fetch bill fail.
+        setBillMap(new Map());
+      }
     } catch (e) {
       setErr(errorMessage(e));
     } finally {
@@ -82,10 +157,77 @@ export function TransactionsPage() {
     load();
   }, []);
 
+  const datePresets = useMemo(() => {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfDay.getDate() - startOfDay.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const day7 = new Date(startOfDay);
+    day7.setDate(startOfDay.getDate() - 7);
+    const day30 = new Date(startOfDay);
+    day30.setDate(startOfDay.getDate() - 30);
+    return [
+      {
+        id: 'today',
+        label: 'Hôm nay',
+        match: (iso: string) => {
+          const d = new Date(iso);
+          return d >= startOfDay;
+        },
+      },
+      {
+        id: 'this_week',
+        label: 'Tuần này',
+        match: (iso: string) => new Date(iso) >= startOfWeek,
+      },
+      {
+        id: 'this_month',
+        label: 'Tháng này',
+        match: (iso: string) => new Date(iso) >= startOfMonth,
+      },
+      {
+        id: 'last_7',
+        label: '7 ngày qua',
+        match: (iso: string) => new Date(iso) >= day7,
+      },
+      {
+        id: 'last_30',
+        label: '30 ngày qua',
+        match: (iso: string) => new Date(iso) >= day30,
+      },
+    ];
+  }, []);
+
   const filtered = useMemo(() => {
-    if (filter === 'all') return items;
-    return items.filter(t => t.type === filter);
-  }, [items, filter]);
+    const dateMatch = datePreset
+      ? datePresets.find(p => p.id === datePreset)?.match
+      : null;
+    return items.filter(t => {
+      if (filter !== 'all' && t.type !== filter) return false;
+      if (payeeFilter.length > 0) {
+        const payee = (t.payee ?? '').trim();
+        if (!payeeFilter.includes(payee)) return false;
+      }
+      if (accountFilter.length > 0) {
+        const accId = t.account_id ?? '';
+        if (!accountFilter.includes(accId)) return false;
+      }
+      if (categoryFilter.length > 0) {
+        // Nếu lọc theo danh mục nhưng giao dịch chuyển khoản/không có danh mục -> loại
+        // categoryFilter chứa id có/không prefix 'global:'; so sánh đúng giá trị lưu trong tx
+        const key = t.global_category_id
+          ? `global:${t.global_category_id}`
+          : t.category_id;
+        if (!key || !categoryFilter.includes(key)) return false;
+      }
+      if (dateMatch && !dateMatch(t.occurred_at)) return false;
+      const amt = Math.abs(t.amount_minor);
+      if (amountMin != null && amt < amountMin) return false;
+      if (amountMax != null && amt > amountMax) return false;
+      return true;
+    });
+  }, [items, filter, payeeFilter, accountFilter, categoryFilter, datePreset, amountMin, amountMax, datePresets]);
 
   const accountById = useMemo(() => {
     const map = new Map<string, FinancialAccount>();
@@ -98,6 +240,18 @@ export function TransactionsPage() {
     categories.forEach(c => map.set(c.id, c));
     return map;
   }, [categories]);
+
+  const payeeOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of items) {
+      const p = (t.payee ?? '').trim();
+      if (!p) continue;
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, count]) => ({ id: label, label, count }));
+  }, [items]);
 
   async function handleVoid(t: Transaction) {
     const ok = await confirm({
@@ -214,6 +368,22 @@ export function TransactionsPage() {
         ))}
       </div>
 
+      {columnFilterCount > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-600 dark:text-inkDark-500">
+          <span className="font-medium">Đang lọc:</span>
+          <span className="chip bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">
+            {filtered.length}/{items.length} giao dịch
+          </span>
+          <button
+            type="button"
+            onClick={resetAllColumnFilters}
+            className="inline-flex items-center gap-1 text-ink-500 underline-offset-2 hover:text-ink-800 hover:underline dark:text-inkDark-500 dark:hover:text-inkDark-100"
+          >
+            <XIcon size={11} /> Xóa tất cả bộ lọc
+          </button>
+        </div>
+      )}
+
       {err && <ErrorState message={err} onRetry={load} />}
 
       {loading ? (
@@ -238,11 +408,97 @@ export function TransactionsPage() {
         />
       ) : (
         <>
+          {/* Mobile + tablet: bộ lọc cột (popover phễu) */}
+          <div className="flex flex-wrap items-center gap-1.5 rounded-card border border-ink-100 bg-surface-sunken px-3 py-2 text-2xs font-medium uppercase tracking-[0.12em] text-ink-500 dark:border-ink-800 dark:bg-surface-dark-sunken dark:text-inkDark-500">
+            <span className="mr-1">Lọc theo:</span>
+            <span className="inline-flex items-center gap-1">
+              Mô tả
+              <ColumnFilterTrigger
+                label="Mô tả"
+                kind="search"
+                options={payeeOptions}
+                selected={payeeFilter}
+                onToggle={v => toggleIn(setPayeeFilter, v)}
+                onReset={() => setPayeeFilter([])}
+                activeCount={payeeFilter.length}
+                placeholder="Tìm đối tượng..."
+              />
+            </span>
+            <span className="inline-flex items-center gap-1">
+              Tài khoản
+              <ColumnFilterTrigger
+                label="Tài khoản"
+                kind="checkbox"
+                options={accounts
+                  .filter(a => items.some(t => t.account_id === a.id))
+                  .map(a => ({
+                    id: a.id,
+                    label: a.name,
+                    icon: <AccountIcon name={a.icon} color={a.color} size="xs" variant="solid" />,
+                    count: items.filter(t => t.account_id === a.id).length,
+                  }))}
+                selected={accountFilter}
+                onToggle={v => toggleIn(setAccountFilter, v)}
+                onReset={() => setAccountFilter([])}
+                activeCount={accountFilter.length}
+              />
+            </span>
+            <span className="inline-flex items-center gap-1">
+              Danh mục
+              <ColumnFilterTrigger
+                label="Danh mục"
+                kind="checkbox"
+                options={categories
+                  .filter(c => items.some(t => categoryKey(t) === c.id))
+                  .map(c => ({
+                    id: c.id,
+                    label: c.name,
+                    icon: <CategoryIcon name={c.icon} color={c.color} size="xs" />,
+                    count: items.filter(t => categoryKey(t) === c.id).length,
+                  }))}
+                selected={categoryFilter}
+                onToggle={v => toggleIn(setCategoryFilter, v)}
+                onReset={() => setCategoryFilter([])}
+                activeCount={categoryFilter.length}
+              />
+            </span>
+            <span className="inline-flex items-center gap-1">
+              Ngày
+              <ColumnFilterTrigger
+                label="Ngày"
+                kind="datePresets"
+                presets={datePresets}
+                value={datePreset}
+                onChange={setDatePreset}
+                activeCount={datePreset ? 1 : 0}
+                onReset={() => setDatePreset(null)}
+              />
+            </span>
+            <span className="inline-flex items-center gap-1">
+              Số tiền
+              <ColumnFilterTrigger
+                label="Số tiền"
+                kind="amountRange"
+                min={amountMin}
+                max={amountMax}
+                onChange={(min, max) => {
+                  setAmountMin(min);
+                  setAmountMax(max);
+                }}
+                activeCount={(amountMin != null ? 1 : 0) + (amountMax != null ? 1 : 0)}
+                onReset={() => {
+                  setAmountMin(null);
+                  setAmountMax(null);
+                }}
+              />
+            </span>
+          </div>
+
           {/* Mobile: card layout */}
           <ul className="space-y-2 md:hidden">
             {filtered.map(t => {
               const acc = accountById.get(t.account_id ?? '');
-              const cat = t.category_id ? categoryById.get(t.category_id) : undefined;
+              const cat = resolveCategory(categoryById, t);
               const isVoid = t.status === 'voided';
               return (
                 <li
@@ -291,7 +547,16 @@ export function TransactionsPage() {
                       {formatVND(t.amount_minor)}
                     </div>
                     {!isVoid && t.source !== 'bank' && (
-                      <div className="mt-1 flex justify-end gap-2">
+                      <div className="mt-1 flex flex-wrap justify-end gap-1.5">
+                        {(billMap.get(t.id)?.item_count ?? 0) > 0 && (
+                          <button
+                            className="btn-ghost !px-1.5 !py-0.5 !text-2xs text-info-600 hover:!bg-info-50 dark:text-info-400 dark:hover:!bg-info-500/15 inline-flex items-center gap-1"
+                            onClick={() => setBillDetailTx(t)}
+                            title="Xem bill của giao dịch"
+                          >
+                            <Info size={11} /> Bill
+                          </button>
+                        )}
                         {t.type !== 'transfer' && (
                           <button
                             className="btn-ghost !px-1.5 !py-0.5 !text-2xs text-ink-600 hover:!bg-ink-100 dark:text-inkDark-500 dark:hover:!bg-ink-700/40"
@@ -320,18 +585,113 @@ export function TransactionsPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-ink-100 bg-surface-sunken text-2xs uppercase tracking-[0.14em] text-ink-500 dark:border-ink-800 dark:bg-surface-dark-sunken dark:text-inkDark-500">
                   <tr>
-                    <th className="px-4 py-2.5 text-left font-medium">Mô tả</th>
-                    <th className="px-4 py-2.5 text-left font-medium">Tài khoản</th>
-                    <th className="px-4 py-2.5 text-left font-medium">Danh mục</th>
-                    <th className="px-4 py-2.5 text-left font-medium">Ngày</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Số tiền</th>
+                    <th className="px-4 py-2.5 text-left font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        Mô tả
+                        <ColumnFilterTrigger
+                          label="Mô tả"
+                          kind="search"
+                          options={payeeOptions}
+                          selected={payeeFilter}
+                          onToggle={v => toggleIn(setPayeeFilter, v)}
+                          onReset={() => setPayeeFilter([])}
+                          activeCount={payeeFilter.length}
+                          placeholder="Tìm đối tượng..."
+                        />
+                      </span>
+                    </th>
+                    <th className="px-4 py-2.5 text-left font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        Tài khoản
+                        <ColumnFilterTrigger
+                          label="Tài khoản"
+                          kind="checkbox"
+                          options={accounts
+                            .filter(a => items.some(t => t.account_id === a.id))
+                            .map(a => ({
+                              id: a.id,
+                              label: a.name,
+                              icon: (
+                                <AccountIcon
+                                  name={a.icon}
+                                  color={a.color}
+                                  size="xs"
+                                  variant="solid"
+                                />
+                              ),
+                              count: items.filter(t => t.account_id === a.id).length,
+                            }))}
+                          selected={accountFilter}
+                          onToggle={v => toggleIn(setAccountFilter, v)}
+                          onReset={() => setAccountFilter([])}
+                          activeCount={accountFilter.length}
+                        />
+                      </span>
+                    </th>
+                    <th className="px-4 py-2.5 text-left font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        Danh mục
+                        <ColumnFilterTrigger
+                          label="Danh mục"
+                          kind="checkbox"
+                          options={categories
+                            .filter(c => items.some(t => categoryKey(t) === c.id))
+                            .map(c => ({
+                              id: c.id,
+                              label: c.name,
+                              icon: (
+                                <CategoryIcon name={c.icon} color={c.color} size="xs" />
+                              ),
+                              count: items.filter(t => categoryKey(t) === c.id).length,
+                            }))}
+                          selected={categoryFilter}
+                          onToggle={v => toggleIn(setCategoryFilter, v)}
+                          onReset={() => setCategoryFilter([])}
+                          activeCount={categoryFilter.length}
+                        />
+                      </span>
+                    </th>
+                    <th className="px-4 py-2.5 text-left font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        Ngày
+                        <ColumnFilterTrigger
+                          label="Ngày"
+                          kind="datePresets"
+                          presets={datePresets}
+                          value={datePreset}
+                          onChange={setDatePreset}
+                          activeCount={datePreset ? 1 : 0}
+                          onReset={() => setDatePreset(null)}
+                        />
+                      </span>
+                    </th>
+                    <th className="px-4 py-2.5 text-right font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        Số tiền
+                        <ColumnFilterTrigger
+                          label="Số tiền"
+                          kind="amountRange"
+                          min={amountMin}
+                          max={amountMax}
+                          onChange={(min, max) => {
+                            setAmountMin(min);
+                            setAmountMax(max);
+                          }}
+                          activeCount={(amountMin != null ? 1 : 0) + (amountMax != null ? 1 : 0)}
+                          onReset={() => {
+                            setAmountMin(null);
+                            setAmountMax(null);
+                          }}
+                        />
+                      </span>
+                    </th>
                     <th className="px-4 py-2.5 text-right font-medium"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(t => {
                     const acc = accountById.get(t.account_id ?? '');
-                    const cat = t.category_id ? categoryById.get(t.category_id) : undefined;
+                    const cat = resolveCategory(categoryById, t);
                     const isVoid = t.status === 'voided';
                     return (
                       <tr
@@ -393,7 +753,16 @@ export function TransactionsPage() {
                         </td>
                         <td className="px-4 py-3 text-right">
                           {!isVoid && t.source !== 'bank' && (
-                            <div className="inline-flex items-center gap-2">
+                            <div className="inline-flex items-center gap-1.5">
+                              {(billMap.get(t.id)?.item_count ?? 0) > 0 && (
+                                <button
+                                  className="btn-ghost inline-flex items-center gap-1 !px-2 !py-1 !text-2xs text-info-600 hover:!bg-info-50 dark:text-info-400 dark:hover:!bg-info-500/15"
+                                  onClick={() => setBillDetailTx(t)}
+                                  title="Xem bill của giao dịch"
+                                >
+                                  <Info size={11} /> Bill
+                                </button>
+                              )}
                               {t.type !== 'transfer' && (
                                 <button
                                   className="btn-ghost inline-flex items-center gap-1 !px-2 !py-1 !text-2xs text-ink-600 hover:!bg-ink-100 dark:text-inkDark-500 dark:hover:!bg-ink-700/40"
@@ -431,6 +800,10 @@ export function TransactionsPage() {
             toast.push('success', 'Đã tạo giao dịch');
             load();
           }}
+          bill={bill}
+          setBill={setBill}
+          billModalOpen={billModalOpen}
+          setBillModalOpen={setBillModalOpen}
         />
       )}
       {editTarget && (
@@ -442,6 +815,10 @@ export function TransactionsPage() {
           initialAccountId={editTarget.accountId}
           onClose={() => setEditTarget(null)}
           onSaved={handleEditSaved}
+          bill={bill}
+          setBill={setBill}
+          billModalOpen={billModalOpen}
+          setBillModalOpen={setBillModalOpen}
         />
       )}
       {openForm === 'transfer' && (
@@ -463,6 +840,59 @@ export function TransactionsPage() {
           onSaved={() => {
             // Load được trigger sau khi modal close (xem bên trong modal).
             load();
+          }}
+        />
+      )}
+
+      {/* Modal Bill read-only — mở nhanh từ nút Info ở danh sách GD */}
+      {billDetailTx && (
+        <BillDetailModal
+          open={!!billDetailTx}
+          transactionId={billDetailTx.id}
+          transactionAmountMinor={billDetailTx.amount_minor}
+          onClose={() => setBillDetailTx(null)}
+          onEdit={existingBill => {
+            // Mở ManualTransactionModal edit + BillOcrModal update.
+            setBillDetailTx(null);
+            const tx = items.find(t => t.id === existingBill.bill.transaction_id);
+            if (!tx) {
+              toast.push('error', 'Không tìm thấy giao dịch để sửa bill');
+              return;
+            }
+            getTransactionAccountId(tx.id).then(accountId => {
+              if (!accountId) {
+                toast.push('error', 'Không tìm thấy tài khoản của giao dịch');
+                return;
+              }
+              setEditTarget({ tx, accountId });
+              setBill(existingBill);
+              setBillModalOpen(true);
+            });
+          }}
+          onDeleted={async () => {
+            await refreshBillMap();
+          }}
+        />
+      )}
+
+      {/* Modal Bill OCR — mở từ ManualTransactionModal hoặc BillDetailModal.Sửa */}
+      {billModalOpen && editTarget && (
+        <BillOcrModal
+          open={billModalOpen}
+          transactionId={editTarget.tx.id}
+          transactionAmountMinor={editTarget.tx.amount_minor}
+          existingBill={bill}
+          onClose={() => {
+            setBillModalOpen(false);
+            setBill(null);
+          }}
+          onSaved={saved => {
+            setBill(saved);
+            setBillModalOpen(false);
+          }}
+          onDeleted={() => {
+            setBill(null);
+            setBillModalOpen(false);
           }}
         />
       )}
@@ -552,6 +982,11 @@ interface ManualProps {
   /** accountId lấy từ transaction_entries (transactions không có) */
   initialAccountId?: string;
   mode?: 'create' | 'edit';
+  /** Bill state lifted to parent (TransactionsPage) để BillDetailModal.Sửa có thể set */
+  bill: BillWithItems | null;
+  setBill: (b: BillWithItems | null) => void;
+  billModalOpen: boolean;
+  setBillModalOpen: (open: boolean) => void;
 }
 
 function ManualTransactionModal({
@@ -562,6 +997,10 @@ function ManualTransactionModal({
   initialValues,
   initialAccountId,
   mode = 'create',
+  bill,
+  setBill,
+  billModalOpen,
+  setBillModalOpen,
 }: ManualProps) {
   const tx = initialValues ?? null;
   const isEdit = mode === 'edit' && !!tx;
@@ -574,7 +1013,9 @@ function ManualTransactionModal({
   );
   // null = rỗng (placeholder hiện); create dùng null, edit dùng amount_minor
   const [amount, setAmount] = useState<number | null>(tx?.amount_minor ?? null);
-  const [categoryId, setCategoryId] = useState<string>(tx?.category_id ?? '');
+  const [categoryId, setCategoryId] = useState<string>(
+    tx?.global_category_id ? `global:${tx.global_category_id}` : (tx?.category_id ?? ''),
+  );
   const [payee, setPayee] = useState(tx?.payee ?? '');
   const [note, setNote] = useState(tx?.note ?? '');
   const [occurredAt, setOccurredAt] = useState(
@@ -584,6 +1025,67 @@ function ManualTransactionModal({
   );
   const [submitting, setSubmitting] = useState(false);
   const [amountError, setAmountError] = useState<string | null>(null);
+
+  // Bill state (chỉ dùng khi category = Mua sắm và đang ở chế độ edit GD expense)
+  const [billLoading, setBillLoading] = useState(false);
+
+  // Load bill khi mở form edit GD expense có category = Mua sắm
+  useEffect(() => {
+    if (!isEdit || !tx) {
+      setBill(null);
+      return;
+    }
+    const cat = categories.find(c => c.id === categoryId);
+    if (!isShoppingCategory(cat)) {
+      setBill(null);
+      return;
+    }
+    setBillLoading(true);
+    getBillWithItems(tx.id)
+      .then(b => setBill(b))
+      .catch(() => setBill(null))
+      .finally(() => setBillLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, tx?.id, categoryId]);
+
+  // Trả hộ state
+  const [isPayingFor, setIsPayingFor] = useState(false);
+  const [activeDebts, setActiveDebts] = useState<Debt[]>([]);
+  const [selectedDebtId, setSelectedDebtId] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState<number | null>(null);
+
+  // Load active lend debts when toggling
+  useEffect(() => {
+    if (isPayingFor && !isEdit) {
+      import('../lib/api').then(async ({ getDebts, getPeople }) => {
+        try {
+          const debts = await getDebts();
+          const people = await getPeople();
+          const peopleMap = new Map(people.map(p => [p.id, p.name]));
+
+          // Filter only active lend debts (someone owes money to user)
+          const lendDebts = debts.filter(d => d.type === 'lend' && d.status === 'active');
+          setActiveDebts(lendDebts);
+
+          // Enrich with person names
+          const enriched = lendDebts.map(d => ({
+            ...d,
+            person_name: peopleMap.get(d.person_id ?? '') ?? 'Người không xác định',
+          }));
+          setActiveDebts(enriched as Debt[]);
+
+          if (enriched.length > 0) {
+            setSelectedDebtId(enriched[0].id);
+            setPaymentAmount(enriched[0].remaining_amount);
+          }
+        } catch (e) {
+          console.error('Failed to load debts:', e);
+        }
+      });
+    }
+  }, [isPayingFor, isEdit]);
+
+  const selectedDebt = activeDebts.find(d => d.id === selectedDebtId);
 
   const filteredCats = useMemo(
     () => categories.filter(c => c.kind === type || c.kind === 'both'),
@@ -623,6 +1125,31 @@ function ManualTransactionModal({
           payee: payee.trim() || null,
           note: note.trim() || null,
         });
+
+        // Nếu đang ghi nhận trả hộ: tạo transaction thu + payment
+        if (isPayingFor && selectedDebt && paymentAmount && paymentAmount > 0) {
+          // Tạo transaction thu tiền từ người nợ
+          const personName = (selectedDebt as Debt & { person_name?: string }).person_name ?? 'Người nợ';
+          await createManualTransaction({
+            type: 'income',
+            account_id: accountId,
+            amount_minor: paymentAmount,
+            occurred_at: fromLocalDateTimeInput(occurredAt),
+            category_id: categoryId || null,
+            payee: personName,
+            note: `Thu hộ: ${note || 'Trả hộ'}`,
+          });
+
+          // Ghi nhận payment cho khoản nợ
+          await addDebtPayment({
+            debt_id: selectedDebt.id,
+            amount: paymentAmount,
+            payment_date: fromLocalDateTimeInput(occurredAt),
+            note: note.trim() || null,
+          });
+
+          toast.push('success', `Đã thu ${new Intl.NumberFormat('vi-VN').format(paymentAmount)}đ từ ${personName}`);
+        }
       }
       onSaved();
     } catch (e) {
@@ -727,6 +1254,42 @@ function ManualTransactionModal({
           </FormField>
         </div>
 
+        {/* Bill mua sắm — chỉ hiện khi đang sửa GD expense có category = Mua sắm */}
+        {isEdit && isShoppingCategory(selectedCategory) && (
+          <div className="rounded-card border border-brand-200 bg-brand-50/30 p-3 dark:border-brand-800 dark:bg-brand-500/5">
+            <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300">
+              <Receipt size={12} strokeWidth={1.75} />
+              Bill mua sắm
+            </div>
+            {billLoading ? (
+              <div className="flex items-center gap-2 text-xs text-ink-500 dark:text-inkDark-500">
+                <Spinner size="sm" /> Đang tải bill…
+              </div>
+            ) : (
+              <BillBadge
+                bill={bill}
+                onCreate={() => setBillModalOpen(true)}
+                onEdit={() => setBillModalOpen(true)}
+                onDelete={async () => {
+                  if (!bill) return;
+                  if (!window.confirm('Xoá bill này? Giao dịch gốc vẫn được giữ nguyên.')) return;
+                  try {
+                    const { deleteBill } = await import('../lib/api');
+                    await deleteBill(bill.bill.id);
+                    setBill(null);
+                    toast.push('success', 'Đã xoá bill');
+                  } catch (e) {
+                    toast.push('error', e instanceof Error ? e.message : String(e));
+                  }
+                }}
+              />
+            )}
+            <div className="mt-2 text-2xs text-ink-500 dark:text-inkDark-500">
+              Bill lưu danh sách sản phẩm + kênh mua (online/offline). Số dư tài khoản vẫn tính theo số tiền giao dịch gốc.
+            </div>
+          </div>
+        )}
+
         {selectedCategory && (
           <div className="flex items-center gap-2 rounded-card border border-ink-100 bg-surface-sunken px-3 py-2 text-xs text-ink-600 dark:border-ink-800 dark:bg-surface-dark-sunken dark:text-inkDark-500">
             <CategoryIcon name={selectedCategory.icon} color={selectedCategory.color} size="xs" />
@@ -760,6 +1323,76 @@ function ManualTransactionModal({
             placeholder="..."
           />
         </FormField>
+
+        {/* Trả hộ toggle - chỉ hiện khi tạo mới giao dịch chi */}
+        {!isEdit && type === 'expense' && (
+          <div className="rounded-card border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-500/10">
+            <label className="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={isPayingFor}
+                onChange={e => setIsPayingFor(e.target.checked)}
+                className="h-5 w-5 rounded border-ink-300 text-brand-500 focus:ring-brand-500"
+              />
+              <div className="flex items-center gap-2 text-brand-700 dark:text-brand-400">
+                <Users size={18} />
+                <span className="font-medium">Trả hộ ai đó</span>
+              </div>
+            </label>
+
+            {isPayingFor && (
+              <div className="mt-3 space-y-3">
+                <FormField label="Khoản cho vay">
+                  <select
+                    className="input w-full"
+                    value={selectedDebtId}
+                    onChange={e => {
+                      setSelectedDebtId(e.target.value);
+                      const debt = activeDebts.find(d => d.id === e.target.value);
+                      if (debt) {
+                        setPaymentAmount(debt.remaining_amount);
+                      }
+                    }}
+                  >
+                    {activeDebts.length === 0 ? (
+                      <option value="">Không có khoản cho vay nào</option>
+                    ) : (
+                      activeDebts.map(d => {
+                        const personName = (d as Debt & { person_name?: string }).person_name ?? 'Người không xác định';
+                        return (
+                          <option key={d.id} value={d.id}>
+                            {personName} - Còn nợ: {new Intl.NumberFormat('vi-VN').format(d.remaining_amount)}đ
+                          </option>
+                        );
+                      })
+                    )}
+                  </select>
+                </FormField>
+
+                {selectedDebt && (
+                  <div className="rounded-card border border-ink-200 bg-surface p-3 dark:border-ink-700 dark:bg-surface-dark">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-ink-600 dark:text-inkDark-400">Số tiền thu lại:</span>
+                      <VNDInput
+                        value={paymentAmount}
+                        onChange={v => setPaymentAmount(v)}
+                        className="input w-40"
+                        autoFocus
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => selectedDebt && setPaymentAmount(selectedDebt.remaining_amount)}
+                      className="mt-2 text-xs text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Thu đủ ({new Intl.NumberFormat('vi-VN').format(selectedDebt.remaining_amount)}đ)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   );

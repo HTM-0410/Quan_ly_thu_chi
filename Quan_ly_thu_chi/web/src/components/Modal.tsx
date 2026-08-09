@@ -9,6 +9,15 @@ interface ModalProps {
   description?: string;
   children: ReactNode;
   footer?: ReactNode;
+  /** Convenience prop: renders a primary button in the footer */
+  primaryLabel?: string;
+  onPrimary?: () => void;
+  loading?: boolean;
+  destructive?: boolean;
+  /** Secondary/destructive button in the footer */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+  secondaryDestructive?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
@@ -19,6 +28,13 @@ export function Modal({
   description,
   children,
   footer,
+  primaryLabel,
+  onPrimary,
+  loading = false,
+  destructive = false,
+  secondaryLabel,
+  onSecondary,
+  secondaryDestructive = false,
   size = 'md',
 }: ModalProps) {
   const titleId = useId();
@@ -121,9 +137,45 @@ export function Modal({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
-        {footer && (
+        {(footer || primaryLabel || secondaryLabel) && (
           <div className="flex flex-wrap justify-end gap-2 border-t border-ink-100 bg-surface-sunken px-5 py-3.5 dark:border-ink-800 dark:bg-surface-dark-sunken">
             {footer}
+            {secondaryLabel && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={onSecondary}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 rounded-btn px-4 py-2 text-sm font-semibold transition shadow-sm',
+                  secondaryDestructive
+                    ? 'border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-500/10'
+                    : 'border border-ink-200 text-ink-600 hover:bg-ink-50 disabled:opacity-50 dark:border-ink-700 dark:text-inkDark-400 dark:hover:bg-ink-800'
+                )}
+              >
+                {loading && (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                )}
+                {secondaryLabel}
+              </button>
+            )}
+            {primaryLabel && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={onPrimary}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 rounded-btn px-4 py-2 text-sm font-semibold transition shadow-sm',
+                  destructive
+                    ? 'bg-err-600 text-white hover:bg-err-700 disabled:opacity-50'
+                    : 'bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 disabled:opacity-50 dark:bg-brand-500 dark:hover:bg-brand-400 dark:active:bg-brand-600',
+                )}
+              >
+                {loading && (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                )}
+                {primaryLabel}
+              </button>
+            )}
           </div>
         )}
       </div>

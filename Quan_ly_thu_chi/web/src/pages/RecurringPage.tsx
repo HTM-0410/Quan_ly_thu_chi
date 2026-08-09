@@ -18,6 +18,7 @@ import {
   updateRecurring,
 } from '../lib/api';
 import { formatDate, formatVND } from '../lib/format';
+import { resolveCategory } from '../lib/categoryResolve';
 import {
   RECURRING_FREQ_LABEL,
   RECURRING_STATUS_LABEL,
@@ -110,7 +111,7 @@ export function RecurringPage() {
       amount_minor: r.amount_minor,
       frequency: r.frequency,
       start_date: r.start_date,
-      category_id: r.category_id ?? '',
+      category_id: r.global_category_id ? `global:${r.global_category_id}` : (r.category_id ?? ''),
       payee: r.payee ?? '',
       note: r.note ?? '',
       day_of_month: r.day_of_month?.toString() ?? '1',
@@ -185,6 +186,7 @@ export function RecurringPage() {
   }
 
   const accountById = new Map(accounts.map(a => [a.id, a]));
+  const categoryById = new Map(categories.map(c => [c.id, c]));
   const cats = categories.filter(c => c.kind === form.type || c.kind === 'both');
 
   return (
@@ -244,7 +246,7 @@ export function RecurringPage() {
         <div className="space-y-2">
           {items.map(r => {
             const acc = accountById.get(r.account_id);
-            const cat = r.category_id ? categories.find(c => c.id === r.category_id) : null;
+            const cat = resolveCategory(categoryById, r);
             const statusChip =
               r.status === 'active'
                 ? 'bg-ok-50 text-ok-700 dark:bg-ok-700/15 dark:text-ok-500'

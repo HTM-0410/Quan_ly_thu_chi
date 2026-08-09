@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   Activity,
   ArrowLeftRight,
+  CreditCard,
   LogOut,
   PieChart,
   Repeat,
@@ -10,6 +11,7 @@ import {
   Tag,
   Target,
   TrendingUp,
+  Users,
   Wallet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -35,6 +37,8 @@ const NAV: NavItem[] = [
   { to: '/goals', label: 'Mục tiêu', icon: Target },
   { to: '/recurring', label: 'Định kỳ', icon: Repeat },
   { to: '/reports', label: 'Báo cáo', icon: TrendingUp },
+  { to: '/people', label: 'Người quen', icon: Users },
+  { to: '/debts', label: 'Công nợ', icon: CreditCard },
   { to: '/settings', label: 'Cài đặt', icon: SettingsIcon },
 ];
 

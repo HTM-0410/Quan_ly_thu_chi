@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { ArrowLeft, Camera, FileSearch, Loader2, X } from 'lucide-react';
 import { Modal } from '../Modal';
 import { Spinner } from '../Spinner';
+import { BillOcrModal } from '../bill/BillOcrModal';
 import { ReceiptDropzone, type StagedImage } from './ReceiptDropzone';
 import { ReceiptPreviewTable, type PreviewRow } from './ReceiptPreviewTable';
 import { ReceiptImportFallback } from './ReceiptImportFallback';
@@ -14,10 +15,10 @@ import {
   type ParseReceiptOptions,
 } from '../../lib/ocr';
 import { MissingOcrConfigError } from '../../lib/config';
-import { importOcrTransactions } from '../../lib/api';
+import { importOcrTransactions, getPeople, getOrCreatePerson, createDebt, createBillWithItems, getBillWithItems, type BillWithItems } from '../../lib/api';
 // force-refresh: 2026-08-02T22:52
-import { toLocalDateTimeInput, fromLocalDateTimeInput } from '../../lib/format';
-import type { Category, FinancialAccount } from '../../lib/types';
+import { toLocalDateTimeInput, fromLocalDateTimeInput, formatVND } from '../../lib/format';
+import type { Category, FinancialAccount, Person } from '../../lib/types';
 
 type Step = 'upload' | 'processing' | 'preview';
 
@@ -32,6 +33,7 @@ interface ReceiptImportModalProps {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  onDebtsCreated?: () => void;
   accounts: FinancialAccount[];
   categories: Category[];
 }
@@ -40,6 +42,7 @@ export function ReceiptImportModal({
   open,
   onClose,
   onSaved,
+  onDebtsCreated,
   accounts,
   categories,
 }: ReceiptImportModalProps) {
@@ -50,6 +53,7 @@ export function ReceiptImportModal({
   const [parseController, setParseController] = useState<{ aborted: boolean } | null>(null);
   const [fallbackReason, setFallbackReason] = useState<'missing_key' | 'other' | null>(null);
   const [fallbackMessage, setFallbackMessage] = useState<string | undefined>(undefined);
+  const [people, setPeople] = useState<Person[]>([]);
 
   // Reset state khi modal đóng/mở.
   useEffect(() => {
@@ -63,14 +67,104 @@ export function ReceiptImportModal({
         if (prev) prev.aborted = true;
         return null;
       });
+    } else {
+      // Load people for debt split feature
+      getPeople()
+        .then(setPeople)
+        .catch(() => setPeople([]));
     }
   }, [open]);
+
+  // Reset people when closing
+  useEffect(() => {
+    if (!open) {
+      setPeople([]);
+    }
+  }, [open]);
+
+  /**
+   * Bill modal flow: sau khi import xong GD Mua sắm + offline + has_bill=true,
+   * mở BillOcrModal cho từng GD để user upload ảnh bill ngay.
+   * Lưu hàng đợi (queue) để xử lý tuần tự.
+   *
+   * Lưu ý: dùng ref `hasPendingBill` (sync) thay vì check billQueue.length
+   * ngay sau loop vì setState là async → check state trong cùng tick là sai.
+   */
+  const [billQueue, setBillQueue] = useState<
+    Array<{ transactionId: string; amountMinor: number; existingBill: BillWithItems | null }>
+  >([]);
+  const [currentBillTx, setCurrentBillTx] = useState<{
+    transactionId: string;
+    amountMinor: number;
+    existingBill: BillWithItems | null;
+  } | null>(null);
+  const hasPendingBillRef = useRef(false);
+
+  // Khi đóng modal OCR, reset queue.
+  useEffect(() => {
+    if (!open) {
+      setBillQueue([]);
+      setCurrentBillTx(null);
+      hasPendingBillRef.current = false;
+    }
+  }, [open]);
+
+  // Khi queue có item và chưa mở modal nào → mở item đầu.
+  // Khi queue rỗng + không có current → reset ref (cho lần import sau).
+  useEffect(() => {
+    if (billQueue.length > 0 && !currentBillTx) {
+      const [next, ...rest] = billQueue;
+      setCurrentBillTx({
+        transactionId: next!.transactionId,
+        amountMinor: next!.amountMinor,
+        existingBill: next!.existingBill,
+      });
+      setBillQueue(rest);
+    } else if (billQueue.length === 0 && !currentBillTx) {
+      hasPendingBillRef.current = false;
+    }
+  }, [billQueue, currentBillTx]);
 
   const categoriesByName = useMemo(() => {
     const m = new Map<string, string>();
     categories.forEach(c => m.set(c.name, c.id));
     return m;
   }, [categories]);
+
+  const categoryById = useMemo(() => {
+    const m = new Map<string, (typeof categories)[number]>();
+    categories.forEach(c => m.set(c.id, c));
+    return m;
+  }, [categories]);
+
+  /** True nếu category có name = "Mua sắm" (case-insensitive). */
+  const isShoppingCategoryLocal = useCallback(
+    (catId: string | null | undefined): boolean => {
+      if (!catId) return false;
+      const cat = categoryById.get(catId);
+      return !!cat && cat.name.trim().toLowerCase() === 'mua sắm';
+    },
+    [categoryById],
+  );
+
+  /** Bill chỉ hợp lệ khi channel đã chọn + các field phụ thuộc đầy đủ. */
+  const isBillComplete = useCallback(
+    (bill: NonNullable<ReturnType<typeof getRows>[number]['bill']>): boolean => {
+      if (bill.channel === null) return false;
+      if (bill.channel === 'offline') {
+        return !!(bill.store_name && bill.store_name.trim().length > 0);
+      }
+      if (bill.channel === 'online') {
+        if (!bill.marketplace) return false;
+        if (bill.marketplace === 'other') {
+          return !!(bill.marketplace_other && bill.marketplace_other.trim().length > 0);
+        }
+        return true;
+      }
+      return false;
+    },
+    [],
+  );
 
   const accountsByHint = useMemo(() => {
     const m = new Map<string, string>();
@@ -197,6 +291,9 @@ export function ReceiptImportModal({
             suggested_category: t.suggested_category ?? null,
             sanity_warning,
             sanity_error,
+            splits: [],
+            split_share: null,
+            bill: null,
           };
         });
         setJobs(prev =>
@@ -257,26 +354,68 @@ export function ReceiptImportModal({
   }
 
   async function commitImport() {
-    const rows = getRows().filter(
-      r => r.selected && r.account_id && r.amount_minor > 0,
-    );
-    if (rows.length === 0) {
-      toast.push('error', 'Chọn ít nhất 1 giao dịch hợp lệ (đã có tài khoản & số tiền > 0)');
+    // Row is valid if:
+    // - splits.length === 0: account_id must be set
+    // - splits.length > 0: each split has account_id and sum equals amount_minor
+    // - split_share: person_id or person_name must be set
+    // - Nếu category = Mua sắm: bill.channel + bill fields phụ thuộc phải đầy đủ.
+    function isValid(row: ReturnType<typeof getRows>[number]): boolean {
+      if (row.amount_minor <= 0) return false;
+      if (row.splits.length === 0 && !row.account_id) return false;
+      if (row.splits.length > 0) {
+        if (!row.splits.every(s => !!s.account_id)) return false;
+        if (row.splits.reduce((s, sp) => s + sp.amount_minor, 0) !== row.amount_minor) return false;
+      }
+      if (isShoppingCategoryLocal(row.category_id)) {
+        if (!row.bill || !isBillComplete(row.bill)) return false;
+      }
+      return true;
+    }
+
+    function isSplitShareValid(share: NonNullable<ReturnType<typeof getRows>[number]['split_share']>): boolean {
+      return !!(share.person_id || share.person_name) && share.amount_minor > 0;
+    }
+
+    const allRows = getRows().filter(r => r.selected && isValid(r));
+    if (allRows.length === 0) {
+      toast.push('error', 'Chọn ít nhất 1 giao dịch hợp lệ (đã có tài khoản, số tiền > 0; GD Mua sắm cần chọn kênh mua hàng)');
       return;
     }
+
+    // Validate split_share rows
+    const rowsWithSplitShare = allRows.filter(r => r.split_share && isSplitShareValid(r.split_share!));
+    for (const row of rowsWithSplitShare) {
+      if (!row.split_share) continue;
+      if (!row.split_share.person_id && !row.split_share.person_name.trim()) {
+        toast.push('error', `Vui lòng nhập tên người chia tiền cho giao dịch "${row.payee || row.suggested_category}"`);
+        return;
+      }
+    }
+
+    // Expand rows with splits into multiple transactions
+    const transactions = allRows.flatMap(r => {
+      const base = {
+        type: r.type,
+        amount_minor: r.amount_minor,
+        occurred_at: fromLocalDateTimeInput(r.occurred_at_local),
+        category_id: r.category_id || null,
+        payee: r.payee.trim() || null,
+        note: r.note.trim() || null,
+      };
+      if (r.splits.length > 0) {
+        return r.splits.map(s => ({
+          ...base,
+          account_id: s.account_id,
+          amount_minor: s.amount_minor,
+        }));
+      }
+      return [{ ...base, account_id: r.account_id }];
+    });
+
     setImporting(true);
     try {
-      const results = await importOcrTransactions(
-        rows.map(r => ({
-          account_id: r.account_id,
-          type: r.type,
-          amount_minor: r.amount_minor,
-          occurred_at: fromLocalDateTimeInput(r.occurred_at_local),
-          category_id: r.category_id || null,
-          payee: r.payee.trim() || null,
-          note: r.note.trim() || null,
-        })),
-      );
+      // Import transactions
+      const results = await importOcrTransactions(transactions);
       const success = results.filter(r => r.ok).length;
       const failed = results.filter(r => !r.ok);
       if (success > 0) {
@@ -287,7 +426,120 @@ export function ReceiptImportModal({
         const display = typeof msg === 'string' ? msg : JSON.stringify(msg);
         toast.push('error', `${failed.length} giao dịch lỗi: ${display}`);
       }
-      if (success > 0) {
+
+      // Tạo bill cho rows Mua sắm (chỉ rows không có splits — bill áp dụng cho cả giao dịch).
+      // Map từ allRows index → transaction ids (flatMap giữ order).
+      let billCount = 0;
+      let txCursor = 0;
+      const flatTxIds: string[] = [];
+      for (const r of allRows) {
+        const count = r.splits.length > 0 ? r.splits.length : 1;
+        const ids = results.slice(txCursor, txCursor + count);
+        for (const res of ids) {
+          if (res.ok) flatTxIds.push(res.id);
+        }
+        txCursor += count;
+      }
+      for (let i = 0; i < allRows.length; i++) {
+        const row = allRows[i]!;
+        if (!row.bill || row.splits.length > 0) continue; // bill chỉ cho row đơn (no splits)
+        // Lấy tx id đầu tiên tương ứng với row này trong flatTxIds.
+        // Vì các row có splits tạo N tx, ta dùng offset khác: đếm tổng tx từ rows trước.
+        let offset = 0;
+        for (let j = 0; j < i; j++) {
+          offset += allRows[j]!.splits.length > 0 ? allRows[j]!.splits.length : 1;
+        }
+        const txId = flatTxIds[offset];
+        if (!txId) continue;
+        try {
+          await createBillWithItems({
+            transaction_id: txId,
+            channel_type: row.bill.channel!,
+            online_marketplace: row.bill.marketplace,
+            online_marketplace_other: row.bill.marketplace_other,
+            store_name: row.bill.store_name,
+            declared_total_minor: row.amount_minor,
+            items: [],
+          });
+          billCount++;
+          // Nếu là Offline + user tick "Giao dịch có bill" → fetch bill vừa tạo
+          // rồi đẩy vào queue để mở BillOcrModal (mode update để giữ store_name đã nhập).
+          if (row.bill.channel === 'offline' && row.bill.has_bill) {
+            hasPendingBillRef.current = true;
+            // Fire-and-forget fetch — không block loop.
+            getBillWithItems(txId)
+              .then(existingBill => {
+                setBillQueue(prev => [
+                  ...prev,
+                  {
+                    transactionId: txId,
+                    amountMinor: row.amount_minor,
+                    existingBill,
+                  },
+                ]);
+              })
+              .catch(() => {
+                // Nếu fetch fail → vẫn mở modal với null (sẽ create lại — nhưng sẽ fail).
+                // Fallback: push queue để user không bị kẹt.
+                setBillQueue(prev => [
+                  ...prev,
+                  { transactionId: txId, amountMinor: row.amount_minor, existingBill: null },
+                ]);
+              });
+          }
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[ocr] createBill error:', e);
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.push('warn', `Lỗi tạo bill cho "${row.payee || row.suggested_category || 'GD'}": ${msg}`);
+        }
+      }
+      if (billCount > 0) {
+        toast.push('success', `Đã tạo ${billCount} bill mua sắm`);
+      }
+
+      // Create debts for split_share rows
+      let debtCount = 0;
+      for (const row of rowsWithSplitShare) {
+        if (!row.split_share) continue;
+        try {
+          let personId: string;
+          const share = row.split_share!;
+
+          if (share.person_id && share.person_id !== '__new__') {
+            personId = share.person_id;
+          } else {
+            // Create new person
+            const newPerson = await getOrCreatePerson(share.person_name.trim());
+            personId = newPerson.id;
+          }
+
+          // Create debt (lend)
+          await createDebt({
+            person_id: personId,
+            type: 'lend',
+            original_amount: share.amount_minor,
+            notes: `Chia tiền từ giao dịch: ${row.payee || row.suggested_category || 'giao dịch'} ${formatVND(Math.round(row.amount_minor / 100))}`,
+          });
+          debtCount++;
+        } catch (e) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          // eslint-disable-next-line no-console
+          console.error('[ocr] createDebt error:', e);
+          toast.push('warn', `Lỗi tạo nợ cho "${row.split_share!.person_name}": ${errMsg}`);
+        }
+      }
+
+      if (debtCount > 0) {
+        toast.push('success', `Đã tạo ${debtCount} khoản cho vay`);
+        onDebtsCreated?.();
+        // Dispatch event để DebtsPage reload
+        window.dispatchEvent(new CustomEvent('debts-updated'));
+      }
+
+      // Nếu có bill trong queue (chưa xử lý) → GIỮ modal OCR mở để BillOcrModal
+      // hiện ra. Modal sẽ đóng khi queue hết (trong onSaved/onClose của BillOcrModal).
+      if (success > 0 && !hasPendingBillRef.current) {
         onSaved();
         onClose();
       }
@@ -299,14 +551,30 @@ export function ReceiptImportModal({
   }
 
   const rows = useMemo(() => getRows(), [jobs]);
+
+  function isRowValid(row: ReturnType<typeof getRows>[number]): boolean {
+    if (row.amount_minor <= 0) return false;
+    if (row.splits.length === 0) return !!row.account_id;
+    return (
+      row.splits.every(s => !!s.account_id) &&
+      row.splits.reduce((s, sp) => s + sp.amount_minor, 0) === row.amount_minor
+    );
+  }
+
+  function isRowBillValid(row: ReturnType<typeof getRows>[number]): boolean {
+    if (!isShoppingCategoryLocal(row.category_id)) return true;
+    return !!row.bill && isBillComplete(row.bill);
+  }
+
   const selectedCount = rows.filter(r => r.selected).length;
-  const validCount = rows.filter(r => r.selected && r.account_id && r.amount_minor > 0).length;
+  const validCount = rows.filter(r => r.selected && isRowValid(r) && isRowBillValid(r)).length;
   const totalAmount = rows
-    .filter(r => r.selected && r.account_id && r.amount_minor > 0)
+    .filter(r => r.selected && isRowValid(r) && isRowBillValid(r))
     .reduce((s, r) => s + r.amount_minor, 0);
 
   return (
-    <Modal
+    <>
+        <Modal
       open={open}
       onClose={() => {
         if (importing) return;
@@ -342,6 +610,7 @@ export function ReceiptImportModal({
               onChange={setRows}
               accounts={accounts}
               categories={categories}
+              people={people}
             />
             <Summary
               selectedCount={selectedCount}
@@ -401,7 +670,43 @@ export function ReceiptImportModal({
           </>
         )}
       </div>
-    </Modal>
+
+      {/* BillOcrModal mở tuần tự cho các GD Mua sắm + offline + has_bill=true.
+          Render NGOÀI <Modal> OCR để tránh z-index conflict. */}
+      {currentBillTx && (
+        <BillOcrModal
+          open={true}
+          transactionId={currentBillTx.transactionId}
+          transactionAmountMinor={currentBillTx.amountMinor}
+          existingBill={currentBillTx.existingBill}
+          onClose={() => {
+            // User đóng modal bill không upload → bỏ qua, mở tiếp (nếu có) hoặc đóng OCR modal.
+            setCurrentBillTx(null);
+            // Đợi effect chạy (reset ref nếu queue hết) rồi check.
+            setTimeout(() => {
+              if (!hasPendingBillRef.current) {
+                onSaved();
+                onClose();
+              }
+            }, 0);
+          }}
+          onSaved={() => {
+            setCurrentBillTx(null);
+            toast.push('success', 'Đã xử lý bill');
+            // Effect sẽ tự mở item tiếp theo nếu queue còn.
+            // Nếu hết queue → đóng luôn OCR modal.
+            // Đợi state propagate rồi check.
+            setTimeout(() => {
+              if (!hasPendingBillRef.current) {
+                onSaved();
+                onClose();
+              }
+            }, 0);
+          }}
+        />
+      )}
+        </Modal>
+    </>
   );
 }
 

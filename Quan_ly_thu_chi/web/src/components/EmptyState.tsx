@@ -1,12 +1,13 @@
-import clsx from 'clsx';
 import type { ReactNode } from 'react';
+import { LucideIcon } from 'lucide-react';
+import clsx from 'clsx';
 
 interface EmptyStateProps {
   title: string;
   description?: string;
-  action?: React.ReactNode;
-  /** Either a Lucide icon (preferred) or legacy string emoji for backward compat. */
-  icon?: ReactNode;
+  action?: ReactNode;
+  /** Lucide icon component, emoji string, or JSX element */
+  icon?: LucideIcon | string | ReactNode;
   className?: string;
 }
 
@@ -14,9 +15,14 @@ export function EmptyState({
   title,
   description,
   action,
-  icon = '📭',
+  icon,
   className,
 }: EmptyStateProps) {
+  // Check if icon is a function (Lucide component) or string (emoji) or ReactNode
+  const isFunction = typeof icon === 'function';
+  const isString = typeof icon === 'string';
+  const isReactElement = isFunction || (icon !== null && typeof icon === 'object' && 'type' in (icon as object));
+
   return (
     <div
       className={clsx(
@@ -25,14 +31,23 @@ export function EmptyState({
         className,
       )}
     >
-      {typeof icon === 'string' ? (
+      {isFunction ? (
+        <div className="grid h-12 w-12 place-items-center rounded-full bg-surface-raised text-ink-400 ring-1 ring-ink-100 dark:bg-surface-dark-raised dark:text-inkDark-500 dark:ring-ink-700">
+          {(() => {
+            const IconComponent = icon as LucideIcon;
+            return <IconComponent size={20} />;
+          })()}
+        </div>
+      ) : isString ? (
+        <div className="text-3xl" aria-hidden="true">
+          {icon}
+        </div>
+      ) : isReactElement ? (
         <div className="text-3xl" aria-hidden="true">
           {icon}
         </div>
       ) : (
-        <div className="grid h-12 w-12 place-items-center rounded-full bg-surface-raised text-ink-400 ring-1 ring-ink-100 dark:bg-surface-dark-raised dark:text-inkDark-500 dark:ring-ink-700">
-          {icon}
-        </div>
+        <div className="text-3xl" aria-hidden="true">📭</div>
       )}
       <div className="text-base font-semibold text-ink-900 dark:text-inkDark-900">{title}</div>
       {description && (

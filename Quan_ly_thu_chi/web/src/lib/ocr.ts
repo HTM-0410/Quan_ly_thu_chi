@@ -225,7 +225,7 @@ export async function parseReceiptFromImage(
     maxRetries: opts.maxRetries ?? 3,
   });
 
-  const parsed = unwrapGeminiJson(json);
+  const parsed: OcrResult = unwrapGeminiJson(json) as OcrResult;
 
   if (!IS_PROD) {
     // eslint-disable-next-line no-console
@@ -237,7 +237,7 @@ export async function parseReceiptFromImage(
     // eslint-disable-next-line no-console
     console.log(
       `[ocr] 🔍 amounts (raw vs sanity):`,
-      (parsed?.transactions ?? []).map((t: { amount_minor?: number; type?: string; occurred_at?: string }) => ({
+      (parsed?.transactions ?? []).map((t: OcrTransaction) => ({
         amount_minor: t.amount_minor,
         type: t.type,
         at: t.occurred_at,

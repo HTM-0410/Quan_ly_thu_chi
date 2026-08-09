@@ -6,6 +6,7 @@ import {
   groupByDay,
   indexByDay,
   localDateKey,
+  localDateKeyFromTz,
   topSpendDays,
   type DailyExpense,
 } from './daily';
@@ -21,6 +22,7 @@ function makeTx(overrides: Partial<Transaction> = {}): Transaction {
     amount_minor: 100_000,
     currency: 'VND',
     category_id: null,
+    global_category_id: null,
     payee: null,
     note: null,
     source: 'manual',
@@ -51,19 +53,53 @@ describe('groupByDay', () => {
       makeTx({ occurred_at: '2026-08-15T01:00:00Z', amount_minor: 50_000 }),
       makeTx({ occurred_at: '2026-08-15T15:00:00Z', amount_minor: 30_000 }),
     ];
-    const map = groupByDay(txs);
+    const map = groupByDay(txs, 'Asia/Ho_Chi_Minh');
     expect(map.size).toBe(1);
     const entry = Array.from(map.values())[0]!;
     expect(entry.amount_minor).toBe(80_000);
     expect(entry.count).toBe(2);
+    expect(entry.income_minor).toBe(0);
   });
 
-  it('skips non-expense and voided transactions', () => {
+  it('skips voided transactions but keeps pending', () => {
     const txs: Transaction[] = [
       makeTx({ type: 'income', amount_minor: 999 }),
       makeTx({ status: 'voided', amount_minor: 999 }),
     ];
-    expect(groupByDay(txs).size).toBe(0);
+    const map = groupByDay(txs, 'Asia/Ho_Chi_Minh');
+    // Income vẫn đếm; voided bỏ qua.
+    expect(map.size).toBe(1);
+    const entry = Array.from(map.values())[0]!;
+    expect(entry.income_minor).toBe(999);
+    expect(entry.amount_minor).toBe(0);
+  });
+
+  it('groups correctly across timezone boundary (UTC+7)', () => {
+    // 2026-08-03 01:00 UTC = 2026-08-03 08:00 VN → cùng ngày
+    // 2026-08-03 00:00 UTC = 2026-08-03 07:00 VN → cùng ngày
+    // 2026-08-02 23:00 UTC = 2026-08-03 06:00 VN → cùng ngày
+    const txs: Transaction[] = [
+      makeTx({ occurred_at: '2026-08-03T01:00:00Z', amount_minor: 100_000 }),
+      makeTx({ occurred_at: '2026-08-02T23:00:00Z', amount_minor: 200_000 }),
+    ];
+    // UTC+7: cả 3 rơi vào 2026-08-03
+    const map = groupByDay(txs, 'Asia/Ho_Chi_Minh');
+    expect(map.size).toBe(1);
+    expect(Array.from(map.values())[0]!.amount_minor).toBe(300_000);
+  });
+
+  it('aggregates income and expense separately', () => {
+    const txs: Transaction[] = [
+      makeTx({ type: 'income', amount_minor: 500_000, occurred_at: '2026-08-15T08:00:00Z' }),
+      makeTx({ type: 'expense', amount_minor: 100_000, occurred_at: '2026-08-15T10:00:00Z' }),
+      makeTx({ type: 'income', amount_minor: 200_000, occurred_at: '2026-08-15T11:00:00Z' }),
+      makeTx({ type: 'expense', amount_minor: 50_000, occurred_at: '2026-08-15T12:00:00Z' }),
+    ];
+    const map = groupByDay(txs, 'Asia/Ho_Chi_Minh');
+    const entry = map.get('2026-08-15')!;
+    expect(entry.income_minor).toBe(700_000);
+    expect(entry.amount_minor).toBe(150_000);
+    expect(entry.count).toBe(2);
   });
 });
 
@@ -93,9 +129,9 @@ describe('buildMonthGrid', () => {
 describe('topSpendDays', () => {
   it('returns top N sorted desc', () => {
     const map = new Map<string, DailyExpense>([
-      ['2026-08-01', { date: '2026-08-01', amount_minor: 100, count: 1 }],
-      ['2026-08-02', { date: '2026-08-02', amount_minor: 500, count: 1 }],
-      ['2026-08-03', { date: '2026-08-03', amount_minor: 300, count: 1 }],
+      ['2026-08-01', { date: '2026-08-01', amount_minor: 100, income_minor: 0, count: 1 }],
+      ['2026-08-02', { date: '2026-08-02', amount_minor: 500, income_minor: 0, count: 1 }],
+      ['2026-08-03', { date: '2026-08-03', amount_minor: 300, income_minor: 0, count: 1 }],
     ]);
     const top = topSpendDays(map, 2);
     expect(top.length).toBe(2);
@@ -107,8 +143,8 @@ describe('topSpendDays', () => {
 describe('computeMonthStats', () => {
   it('computes totals and average', () => {
     const map = new Map<string, DailyExpense>([
-      ['2026-08-01', { date: '2026-08-01', amount_minor: 100_000, count: 1 }],
-      ['2026-08-02', { date: '2026-08-02', amount_minor: 200_000, count: 1 }],
+      ['2026-08-01', { date: '2026-08-01', amount_minor: 100_000, income_minor: 0, count: 1 }],
+      ['2026-08-02', { date: '2026-08-02', amount_minor: 200_000, income_minor: 0, count: 1 }],
     ]);
     const stats = computeMonthStats(map, 2026, 7);
     expect(stats.total_minor).toBe(300_000);
@@ -132,24 +168,25 @@ describe('indexByDay', () => {
       makeTx({ id: 'b', occurred_at: '2026-08-15T08:00:00.000Z' }),
       makeTx({ id: 'c', occurred_at: '2026-08-16T08:00:00.000Z' }),
     ];
-    const map = indexByDay(txs);
+    const map = indexByDay(txs, 'Asia/Ho_Chi_Minh');
     expect(map.size).toBe(2);
-    const keyAug15 = localDateKey(new Date('2026-08-15T01:00:00.000Z'));
-    const keyAug16 = localDateKey(new Date('2026-08-16T08:00:00.000Z'));
-    expect(map.get(keyAug15)?.length).toBe(2);
-    expect(map.get(keyAug16)?.length).toBe(1);
+    expect(map.get('2026-08-15')?.length).toBe(2);
+    expect(map.get('2026-08-16')?.length).toBe(1);
   });
 
-  it('skips non-expense and voided transactions', () => {
+  it('skips voided but keeps income transactions', () => {
     const txs = [
       makeTx({ type: 'income', id: 'i1' }),
       makeTx({ status: 'voided', id: 'v1' }),
       makeTx({ id: 'ok' }),
     ];
-    const map = indexByDay(txs);
+    const map = indexByDay(txs, 'Asia/Ho_Chi_Minh');
     expect(map.size).toBe(1);
     const arr = Array.from(map.values())[0];
-    expect(arr[0].id).toBe('ok');
+    // 2 giao dịch (income + expense) của cùng ngày local 2026-08-15.
+    expect(arr.length).toBe(2);
+    const ids = arr.map(t => t.id).sort();
+    expect(ids).toEqual(['i1', 'ok']);
   });
 
   it('sorts transactions by occurred_at ascending within a day', () => {
@@ -158,9 +195,8 @@ describe('indexByDay', () => {
       makeTx({ id: 'early', occurred_at: '2026-08-15T01:00:00.000Z' }),
       makeTx({ id: 'mid', occurred_at: '2026-08-15T05:00:00.000Z' }),
     ];
-    const map = indexByDay(txs);
-    const key = localDateKey(new Date('2026-08-15T01:00:00.000Z'));
-    const arr = map.get(key)!;
+    const map = indexByDay(txs, 'Asia/Ho_Chi_Minh');
+    const arr = map.get('2026-08-15')!;
     expect(arr.map(t => t.id)).toEqual(['early', 'mid', 'late']);
   });
 });

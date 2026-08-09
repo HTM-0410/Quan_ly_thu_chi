@@ -367,13 +367,15 @@ export function AccountsPage() {
             />
           </FormField>
 
-          <FormField label="Số dư đầu (VND)">
-            <VNDInput
-              value={form.opening_balance_minor || null}
-              onChange={minor => setForm({ ...form, opening_balance_minor: minor ?? 0 })}
-              placeholder={form.id ? 'Số dư đầu ban đầu' : 'VD: 1.000.000'}
-            />
-          </FormField>
+          {!form.id && (
+            <FormField label="Số dư ban đầu (VND)">
+              <VNDInput
+                value={form.opening_balance_minor || null}
+                onChange={minor => setForm({ ...form, opening_balance_minor: minor ?? 0 })}
+                placeholder="Số dư mong muốn khi mở tài khoản"
+              />
+            </FormField>
+          )}
 
           <div className="grid gap-5 sm:grid-cols-2">
             <FormField label="Màu sắc">
@@ -439,7 +441,7 @@ function AdjustBalanceDialog({ account, onClose, onSaved }: AdjustProps) {
     const delta = target - account.balance;
     const ok = await confirm({
       title: 'Đặt số dư tài khoản?',
-      message: `${account.name}: ${formatVND(account.balance)} → ${formatVND(target)} (${delta >= 0 ? '+' : ''}${formatVND(delta)}). Số dư đầu sẽ được điều chỉnh tương ứng.`,
+      message: `${account.name}: ${formatVND(account.balance)} → ${formatVND(target)} (${delta >= 0 ? '+' : ''}${formatVND(delta)}). Hệ thống sẽ tự điều chỉnh để khớp.`,
       confirmText: 'Đặt số dư',
       cancelText: 'Không',
       variant: 'default',
@@ -461,7 +463,7 @@ function AdjustBalanceDialog({ account, onClose, onSaved }: AdjustProps) {
       open
       onClose={() => (submitting ? null : onClose())}
       title={`Đặt số dư: ${account.name}`}
-      description={`Số dư hiện tại: ${formatVND(account.balance)} · Số dư đầu: ${formatVND(account.opening_balance_minor)}`}
+      description={`Số dư hiện tại: ${formatVND(account.balance)} · Số dư gốc: ${formatVND(account.opening_balance_minor)}`}
       size="md"
       footer={
         <>
@@ -497,7 +499,7 @@ function AdjustBalanceDialog({ account, onClose, onSaved }: AdjustProps) {
           />
         </FormField>
         <div className="rounded-card border border-ink-100 bg-surface-sunken px-3 py-2 text-xs text-ink-600 dark:border-ink-800 dark:bg-surface-dark-sunken dark:text-inkDark-500">
-          Số dư đầu sẽ được điều chỉnh sao cho <strong>Số dư đầu + tổng giao dịch = Số dư mong muốn</strong>. Hành động này được ghi audit log.
+          Hệ thống sẽ tự căn chỉnh để <strong>Số dư hiện tại = Số dư mong muốn</strong>. Hành động này được ghi audit log.
         </div>
       </div>
     </Modal>

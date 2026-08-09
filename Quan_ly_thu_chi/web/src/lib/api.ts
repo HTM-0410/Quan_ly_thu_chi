@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { GLOBAL_CATEGORY_PREFIX } from './domain';
 import type {
   FinancialAccount,
   Category,
@@ -7,10 +8,14 @@ import type {
   Budget,
   RecurringRule,
   Profile,
+  Person,
+  Debt,
+  DebtPayment,
+  Bill,
+  BillItem,
+  BillChannel,
+  OnlineMarketplace,
 } from './types';
-
-// ============================================================
-// Profiles
 // ============================================================
 export async function getProfile(userId: string) {
   const { data, error } = await supabase
@@ -142,14 +147,49 @@ export async function getNetWorth(): Promise<number> {
 // Categories
 // ============================================================
 export async function listCategories(): Promise<Category[]> {
-  const { data, error } = await supabase
-    .from('categories')
-    .select('*')
-    .eq('is_archived', false)
-    .order('kind', { ascending: true })
-    .order('sort_order', { ascending: true });
-  if (error) throw error;
-  return (data as Category[]) ?? [];
+  // Query song song 2 bảng: user-private (categories) + global share (global_categories)
+  const [userCats, globalCats] = await Promise.all([
+    supabase
+      .from('categories')
+      .select('*')
+      .eq('is_archived', false)
+      .order('kind', { ascending: true })
+      .order('sort_order', { ascending: true }),
+    supabase
+      .from('global_categories')
+      .select('*')
+      .eq('is_active', true)
+      .order('kind', { ascending: true })
+      .order('sort_order', { ascending: true }),
+  ]);
+  if (userCats.error) throw userCats.error;
+  if (globalCats.error) throw globalCats.error;
+
+  // Normalize global → Category với scope='global' và id prefix 'global:' để tránh
+  // đụng UUID với user cats. Frontend dùng id này; khi save transaction sẽ nhận biết
+  // qua prefix để map sang cột global_category_id / category_id.
+  const userRows: Category[] = ((userCats.data as Category[]) ?? []).map(c => ({
+    ...c,
+    scope: 'user' as const,
+  }));
+  const globalRows: Category[] = ((globalCats.data as any[]) ?? []).map(g => ({
+    id: `${GLOBAL_CATEGORY_PREFIX}${g.id}`,
+    scope: 'global' as const,
+    user_id: null,
+    name: g.name,
+    kind: g.kind,
+    parent_id: null,
+    icon: g.icon ?? 'category',
+    color: g.color ?? '#757575',
+    is_system: true,
+    is_archived: false,
+    sort_order: g.sort_order,
+    created_at: g.created_at,
+    updated_at: g.updated_at,
+    version: 1,
+  }));
+
+  return [...userRows, ...globalRows];
 }
 
 export async function createCategory(input: {
@@ -179,8 +219,45 @@ export async function createCategory(input: {
 }
 
 export async function updateCategory(id: string, patch: Partial<Category>) {
+  if (id.startsWith(GLOBAL_CATEGORY_PREFIX)) {
+    throw new Error('Không thể sửa danh mục hệ thống toàn cục');
+  }
   const { error } = await supabase.from('categories').update(patch).eq('id', id);
   if (error) throw error;
+}
+
+export async function deleteCategory(id: string) {
+  if (id.startsWith(GLOBAL_CATEGORY_PREFIX)) {
+    throw new Error('Không thể xóa danh mục hệ thống toàn cục');
+  }
+  const { error } = await supabase.from('categories').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * Split 1 category id thành {scope, realId}. Trả về cặp này để dispatch sang
+ * cột category_id (user) hoặc global_category_id (global) khi save transaction.
+ */
+export function splitCategoryId(id: string | null | undefined): {
+  scope: 'global' | 'user';
+  realId: string | null;
+} {
+  if (!id) return { scope: 'user', realId: null };
+  if (id.startsWith(GLOBAL_CATEGORY_PREFIX)) {
+    return { scope: 'global', realId: id.slice(GLOBAL_CATEGORY_PREFIX.length) };
+  }
+  return { scope: 'user', realId: id };
+}
+
+/** Helper ngược: build payload category fields khi save transaction/recurring. */
+export function pickCategoryFields(id: string | null | undefined): {
+  category_id: string | null;
+  global_category_id: string | null;
+} {
+  const { scope, realId } = splitCategoryId(id);
+  if (!realId) return { category_id: null, global_category_id: null };
+  if (scope === 'global') return { category_id: null, global_category_id: realId };
+  return { category_id: realId, global_category_id: null };
 }
 
 // ============================================================
@@ -235,7 +312,8 @@ export async function listTransactions(opts?: {
   // Nếu có accountId filter mà không tìm thấy entries nào khớp, trả về rỗng.
   if (opts?.accountId && accountByTxId.size === 0) return [];
 
-  return rows.map(r => ({ ...r, account_id: accountByTxId.get(r.id) ?? null }));
+  const result = rows.map(r => ({ ...r, account_id: accountByTxId.get(r.id) ?? null }));
+  return result;
 }
 
 export async function createManualTransaction(input: {
@@ -256,6 +334,9 @@ export async function createManualTransaction(input: {
       : '[OCR]'
     : input.note ?? null;
 
+  // Split category_id thành {category_id, global_category_id} theo prefix 'global:'
+  const catFields = pickCategoryFields(input.category_id ?? null);
+
   // Retry tối đa 3 lần với client_generated_id mới nếu RPC trả 409 (idempotency conflict).
   // Nguyên nhân: RPC có thể trả 409 khi client_generated_id đã tồn tại ở request khác
   // (vd OCR batch gọi nhiều lần do retry mạng, hoặc user double-click import).
@@ -269,7 +350,8 @@ export async function createManualTransaction(input: {
       p_amount_minor: input.amount_minor,
       p_currency: 'VND',
       p_occurred_at: input.occurred_at,
-      p_category_id: input.category_id ?? null,
+      p_category_id: catFields.category_id,
+      p_global_category_id: catFields.global_category_id,
       p_payee: input.payee ?? null,
       p_note: finalNote,
       p_source: 'manual',
@@ -286,6 +368,7 @@ export async function createManualTransaction(input: {
         amount_minor: input.amount_minor,
         occurred_at: input.occurred_at,
         category_id: input.category_id,
+        catFields,
         payee: input.payee,
         note_len: finalNote?.length ?? 0,
       },
@@ -397,13 +480,17 @@ export async function updateTransaction(
   },
 ) {
   const wantsClear = patch.category_id === null;
+  const catFields = wantsClear
+    ? { category_id: null, global_category_id: null }
+    : pickCategoryFields(patch.category_id ?? null);
   const { error } = await supabase.rpc('update_transaction', {
     p_transaction_id: id,
     p_type: patch.type ?? null,
     p_account_id: patch.account_id ?? null,
     p_amount_minor: patch.amount_minor ?? null,
     p_occurred_at: patch.occurred_at ?? null,
-    p_category_id: wantsClear ? null : patch.category_id ?? null,
+    p_category_id: catFields.category_id,
+    p_global_category_id: catFields.global_category_id,
     p_clear_category: wantsClear,
     p_payee: patch.payee ?? null,
     p_note: patch.note ?? null,
@@ -448,10 +535,12 @@ export async function getTransactionsSummary(opts: {
   end_date: string;
   category_id?: string;
 }) {
+  const catFields = pickCategoryFields(opts.category_id ?? null);
   const { data, error } = await supabase.rpc('get_transactions_summary', {
     p_start_date: opts.start_date,
     p_end_date: opts.end_date,
-    p_category_id: opts.category_id ?? null,
+    p_category_id: catFields.category_id,
+    p_global_category_id: catFields.global_category_id,
   });
   if (error) throw error;
   return data?.[0] as
@@ -467,14 +556,22 @@ export async function getTransactionsSummary(opts: {
 /**
  * Trả về income/expense cho N tháng gần nhất (1 round-trip).
  * Thay thế việc gọi getTransactionsSummary tuần tự trong for-loop.
+ *
+ * `timezone` là IANA tz (vd 'Asia/Ho_Chi_Minh'). RPC dùng tz để xác định
+ * biên tháng theo local time của user — quan trọng cho user ở UTC+7/8
+ * để giao dịch 00:00–06:59 local không bị gán về tháng trước.
  */
-export async function getMonthlyHistory(months = 6) {
+export async function getMonthlyHistory(
+  months = 6,
+  timezone: string = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+) {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
   const { data, error } = await supabase.rpc('get_monthly_history' as never, {
     p_user_id: userId,
     p_months: months,
+    p_timezone: timezone,
   } as never);
   if (error) throw error;
   const rows = (data ?? []) as Array<{
@@ -651,6 +748,7 @@ export async function createRecurring(input: {
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
+  const catFields = pickCategoryFields(input.category_id ?? null);
   const { data, error } = await supabase
     .from('recurring_rules')
     .insert({
@@ -664,7 +762,8 @@ export async function createRecurring(input: {
       start_date: input.start_date,
       next_occurrence: new Date(input.start_date).toISOString(),
       day_of_month: input.day_of_month ?? null,
-      category_id: input.category_id ?? null,
+      category_id: catFields.category_id,
+      global_category_id: catFields.global_category_id,
       payee: input.payee ?? null,
       note: input.note ?? null,
     })
@@ -675,6 +774,15 @@ export async function createRecurring(input: {
 }
 
 export async function updateRecurring(id: string, patch: Partial<RecurringRule>) {
+  // Nếu patch có category_id, split ra 2 cột
+  if ('category_id' in patch) {
+    const catFields = pickCategoryFields(patch.category_id as string | null | undefined);
+    patch = {
+      ...patch,
+      category_id: catFields.category_id,
+      global_category_id: catFields.global_category_id,
+    };
+  }
   const { error } = await supabase.from('recurring_rules').update(patch).eq('id', id);
   if (error) throw error;
 }
@@ -685,4 +793,325 @@ export async function materializeRecurring(upTo?: string) {
   });
   if (error) throw error;
   return Number(data ?? 0);
+}
+
+// ============================================================
+// People & Debts (Quản lý công nợ)
+// ============================================================
+export type { Person, Debt, DebtPayment } from './domain';
+
+export async function getPeople(): Promise<Person[]> {
+  const { data, error } = await supabase.rpc('get_people');
+  if (error) throw error;
+  return (data as Person[]) ?? [];
+}
+
+export async function createPerson(name: string, phone?: string): Promise<Person> {
+  const { data, error } = await supabase.rpc('create_person', {
+    p_name: name,
+    p_phone: phone ?? null,
+  });
+  if (error) throw error;
+  return data as Person;
+}
+
+export async function updatePerson(id: string, name: string, phone?: string): Promise<void> {
+  const { error } = await supabase
+    .from('people')
+    .update({ name, phone: phone ?? null })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * Get existing person by name or create a new one.
+ * Used when splitting expenses with new people.
+ */
+export async function getOrCreatePerson(name: string): Promise<Person> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Person name is required');
+
+  // Get current user ID for proper scoping
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  // First try to find existing person for this user
+  const { data: existing, error: findError } = await supabase
+    .from('people')
+    .select('*')
+    .eq('user_id', user.id)
+    .ilike('name', trimmed)
+    .limit(1);
+
+  if (findError) throw findError;
+
+  if (existing && existing.length > 0) {
+    return existing[0] as Person;
+  }
+
+  // Create new person
+  return createPerson(trimmed);
+}
+
+export async function deletePerson(id: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_person', { p_id: id });
+  if (error) throw error;
+}
+
+export async function getDebts(status?: string): Promise<Debt[]> {
+  const { data, error } = await supabase.rpc('get_debts', {
+    p_status: status ?? null,
+  });
+  if (error) throw error;
+  return (data as Debt[]) ?? [];
+}
+
+export async function getDebtWithPayments(id: string): Promise<{ debt: Debt; payments: DebtPayment[] }> {
+  const { data: debt, error: debtError } = await supabase
+    .from('debts')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (debtError) throw debtError;
+
+  const { data: payments, error: paymentsError } = await supabase
+    .from('debt_payments')
+    .select('*')
+    .eq('debt_id', id)
+    .order('payment_date', { ascending: true });
+  if (paymentsError) throw paymentsError;
+
+  return {
+    debt: debt as Debt,
+    payments: (payments as DebtPayment[]) ?? [],
+  };
+}
+
+export async function createDebt(input: {
+  person_id: string;
+  type: 'lend' | 'borrow';
+  original_amount: number;
+  notes?: string | null;
+}): Promise<Debt> {
+  const { data, error } = await supabase.rpc('create_debt', {
+    p_person_id: input.person_id,
+    p_type: input.type,
+    p_original_amount: input.original_amount,
+    p_notes: input.notes ?? null,
+  });
+  if (error) throw error;
+  return data as Debt;
+}
+
+export async function deleteDebt(id: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_debt', { p_id: id });
+  if (error) throw error;
+}
+
+export async function addDebtPayment(input: {
+  debt_id: string;
+  amount: number;
+  payment_date?: string;
+  note?: string | null;
+}): Promise<DebtPayment> {
+  const { data, error } = await supabase.rpc('add_debt_payment', {
+    p_debt_id: input.debt_id,
+    p_amount: input.amount,
+    p_payment_date: input.payment_date ?? new Date().toISOString(),
+    p_note: input.note ?? null,
+  });
+  if (error) throw error;
+  return data as DebtPayment;
+}
+
+export async function markDebtPaid(id: string): Promise<void> {
+  const { error } = await supabase.rpc('mark_debt_paid', { p_id: id });
+  if (error) throw error;
+}
+
+export interface DebtSummary {
+  totalLending: number;
+  totalBorrowing: number;
+  activeLendCount: number;
+  activeBorrowCount: number;
+}
+
+export async function getDebtSummary(): Promise<DebtSummary> {
+  const { data, error } = await supabase.rpc('get_debt_summary');
+  if (error) throw error;
+
+  const rows = (data as Array<{ metric: string; amount: number; count: number }>) ?? [];
+  const summary: DebtSummary = {
+    totalLending: 0,
+    totalBorrowing: 0,
+    activeLendCount: 0,
+    activeBorrowCount: 0,
+  };
+
+  for (const row of rows) {
+    switch (row.metric) {
+      case 'total_lending':
+        summary.totalLending = row.amount;
+        break;
+      case 'total_borrowing':
+        summary.totalBorrowing = row.amount;
+        break;
+      case 'active_lend_count':
+        summary.activeLendCount = row.count;
+        break;
+      case 'active_borrow_count':
+        summary.activeBorrowCount = row.count;
+        break;
+    }
+  }
+
+  return summary;
+}
+
+// ============================================================
+// Bills (chụp bill siêu thị)
+// ============================================================
+export type { Bill, BillItem, BillChannel, OnlineMarketplace };
+
+export type BillItemInput = {
+  product_name: string;
+  quantity: number;
+  unit_price_minor: number;
+  line_total_minor: number;
+  note?: string | null;
+};
+
+export type BillWithItems = {
+  bill: Bill;
+  items: BillItem[];
+};
+
+/**
+ * Lấy bill + items cho 1 transaction. Trả về null nếu chưa có bill.
+ */
+/**
+ * Lấy bill + items cho 1 transaction. Trả về null nếu chưa có bill.
+ *
+ * Implementation note: RPC `get_bill_with_items` return JSONB. Khi function
+ * RETURN NULL (không có bill), PostgREST default sẽ trả về mảng rỗng `[]`
+ * (cho scalar return). Khi có bill, trả về 1 object `{bill, items}`.
+ * Để tránh ambiguity, ta dùng header Accept `application/vnd.pgrst.object+json`
+ * — PostgREST trả 1 object duy nhất, hoặc 406/empty nếu null. Chuẩn hoá cả 3 case.
+ */
+export async function getBillWithItems(transactionId: string): Promise<BillWithItems | null> {
+  const { data, error } = await supabase.rpc(
+    'get_bill_with_items',
+    { p_transaction_id: transactionId },
+    // Cast cho phép truyền headers phụ (PostgREST object singular).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { headers: { Accept: 'application/vnd.pgrst.object+json' } } as any,
+  );
+  if (error) {
+    // 406 với PGRST116 = không có row (bill không tồn tại) → trả null, không throw.
+    const code = (error as { code?: string }).code;
+    const status = (error as { status?: number }).status;
+    if (code === 'PGRST116' || status === 406) {
+      return null;
+    }
+    throw error;
+  }
+  if (!data) return null;
+  if (Array.isArray(data)) {
+    return data.length > 0 ? (data[0] as BillWithItems) : null;
+  }
+  return data as BillWithItems;
+}
+
+/**
+ * Tạo bill + items. Raise exception nếu transaction đã có bill.
+ * @returns bill_id
+ */
+export async function createBillWithItems(input: {
+  transaction_id: string;
+  channel_type: BillChannel;
+  online_marketplace?: OnlineMarketplace | null;
+  online_marketplace_other?: string | null;
+  store_name?: string | null;
+  declared_total_minor: number;
+  items: BillItemInput[];
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('create_bill_with_items', {
+    p_transaction_id: input.transaction_id,
+    p_channel_type: input.channel_type,
+    p_online_marketplace: input.online_marketplace ?? null,
+    p_online_marketplace_other: input.online_marketplace_other ?? null,
+    p_store_name: input.store_name ?? null,
+    p_declared_total_minor: input.declared_total_minor,
+    p_items: input.items,
+  });
+  if (error) throw error;
+  // PostgREST có thể wrap scalar UUID trong mảng 1 phần tử.
+  const unwrapped = Array.isArray(data) ? data[0] : data;
+  return unwrapped as string;
+}
+
+/**
+ * Cập nhật bill + replace items.
+ */
+export async function updateBillWithItems(
+  billId: string,
+  input: {
+    channel_type: BillChannel;
+    online_marketplace?: OnlineMarketplace | null;
+    online_marketplace_other?: string | null;
+    store_name?: string | null;
+    declared_total_minor: number;
+    items: BillItemInput[];
+  },
+): Promise<string> {
+  const { data, error } = await supabase.rpc('update_bill_with_items', {
+    p_bill_id: billId,
+    p_channel_type: input.channel_type,
+    p_online_marketplace: input.online_marketplace ?? null,
+    p_online_marketplace_other: input.online_marketplace_other ?? null,
+    p_store_name: input.store_name ?? null,
+    p_declared_total_minor: input.declared_total_minor,
+    p_items: input.items,
+  });
+  if (error) throw error;
+  // PostgREST có thể wrap scalar UUID trong mảng 1 phần tử.
+  const unwrapped = Array.isArray(data) ? data[0] : data;
+  return unwrapped as string;
+}
+
+/**
+ * Xoá bill (cascade items).
+ */
+export async function deleteBill(billId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_bill', { p_bill_id: billId });
+  if (error) throw error;
+}
+
+/**
+ * Bill summary tối gọn (không kèm items) — dùng để check nhanh GD nào có bill
+ * và hiện nút Info trên danh sách mà không cần query đầy đủ.
+ */
+export type BillSummary = Pick<
+  Bill,
+  'id' | 'transaction_id' | 'channel_type' | 'store_name' | 'declared_total_minor' | 'item_count'
+>;
+
+/**
+ * Batch lấy bill summaries theo danh sách transaction ids.
+ * Trả về Map<txId, BillSummary> chỉ cho các GD có bill.
+ */
+export async function getBillSummariesForTransactions(
+  transactionIds: string[],
+): Promise<Map<string, BillSummary>> {
+  const out = new Map<string, BillSummary>();
+  if (transactionIds.length === 0) return out;
+  const { data, error } = await supabase
+    .from('bills')
+    .select('id, transaction_id, channel_type, store_name, declared_total_minor, item_count')
+    .in('transaction_id', transactionIds);
+  if (error) throw error;
+  for (const row of (data ?? []) as BillSummary[]) {
+    out.set(row.transaction_id, row);
+  }
+  return out;
 }

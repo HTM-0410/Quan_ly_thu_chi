@@ -77,7 +77,7 @@ export default {
         // Backwards-compatible brand-500 used by old buttons
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['"Noto Sans"', 'system-ui', 'sans-serif'],
         display: ['Fraunces', 'Georgia', 'serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },

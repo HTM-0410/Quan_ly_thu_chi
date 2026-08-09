@@ -25,29 +25,37 @@ interface Props {
 const WEEKDAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
 /**
- * 5 bậc cường độ + dành riêng dải màu "warm red" phù hợp cả light và dark mode.
+ * Tô màu theo giá trị ròng của ngày (thu - chi):
+ * - amount > 0  (bội chi) → tông đỏ (5 bậc)
+ * - amount < 0  (dương)   → tông xanh (5 bậc)
+ * - amount = 0            → nền trung tính
  * Mỗi bậc đã cân chỉnh contrast: text trên nền luôn đạt AA.
- *  - Bậc 0 (không chi): nền trung tính, text muted
- *  - Bậc 1–2: nền đỏ nhạt, text ink đậm
- *  - Bậc 3–4: nền đỏ đậm, text trắng
  */
 type CellTone = 0 | 1 | 2 | 3 | 4;
 
 function intensityTone(amount: number, max: number): CellTone {
   if (amount === 0 || max === 0) return 0;
-  const ratio = amount / max;
+  const ratio = Math.abs(amount) / max;
   if (ratio < 0.25) return 1;
   if (ratio < 0.5) return 2;
   if (ratio < 0.75) return 3;
   return 4;
 }
 
-const TONE_CLASS: Record<CellTone, string> = {
+const RED_TONE_CLASS: Record<CellTone, string> = {
   0: 'bg-ink-50 text-ink-500 dark:bg-inkDark-100 dark:text-inkDark-500',
   1: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300',
   2: 'bg-red-100 text-red-800 dark:bg-red-900/55 dark:text-red-200',
   3: 'bg-red-500 text-white dark:bg-red-700 dark:text-red-50',
   4: 'bg-red-700 text-white dark:bg-red-800 dark:text-red-50',
+};
+
+const GREEN_TONE_CLASS: Record<CellTone, string> = {
+  0: 'bg-ink-50 text-ink-500 dark:bg-inkDark-100 dark:text-inkDark-500',
+  1: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+  2: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/55 dark:text-emerald-200',
+  3: 'bg-emerald-500 text-white dark:bg-emerald-700 dark:text-emerald-50',
+  4: 'bg-emerald-700 text-white dark:bg-emerald-800 dark:text-emerald-50',
 };
 
 function formatMonthLabel(year: number, monthIndex: number): string {
@@ -66,13 +74,31 @@ export function MonthHeatmap({
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const tooltipId = useId();
 
-  const grid = useMemo(() => buildMonthGrid(year, monthIndex, expenses), [year, monthIndex, expenses]);
+  const grid = useMemo(() => {
+    return buildMonthGrid(year, monthIndex, expenses);
+  }, [year, monthIndex, expenses]);
+  // Lấy max của |net| (chi - thu) để tô cường độ đỏ/xanh đối xứng nhau.
   const max = useMemo(
-    () => Array.from(expenses.values()).reduce((m, d) => Math.max(m, d.amount_minor), 0),
+    () =>
+      Array.from(expenses.values()).reduce(
+        (m, d) => Math.max(m, Math.abs(d.amount_minor - d.income_minor)),
+        0,
+      ),
     [expenses],
   );
   const stats = useMemo(() => computeMonthStats(expenses, year, monthIndex), [expenses, year, monthIndex]);
   const topDays = useMemo(() => topSpendDays(expenses, 5), [expenses]);
+  // Tổng thu / chi / ròng trong tháng (dùng cho stat cards).
+  // Quy ước: ròng = income - expense. Dương = dư, Âm = bội chi.
+  const { totalIncome, totalExpense, netMonth } = useMemo(() => {
+    let inc = 0;
+    let exp = 0;
+    for (const d of expenses.values()) {
+      inc += d.income_minor;
+      exp += d.amount_minor;
+    }
+    return { totalIncome: inc, totalExpense: exp, netMonth: inc - exp };
+  }, [expenses]);
 
   function goto(delta: number) {
     const d = new Date(year, monthIndex + delta, 1);
@@ -123,21 +149,35 @@ export function MonthHeatmap({
       </div>
 
       {/* Stat cards */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card-flat px-3 py-2.5">
-          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-500">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ok-600 dark:text-ok-500">
+            Tổng thu nhập
+          </div>
+          <div className="num mt-0.5 text-lg tabular-nums text-ok-700 dark:text-ok-500">
+            {formatVND(totalIncome)}
+          </div>
+        </div>
+        <div className="card-flat px-3 py-2.5">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-err-600 dark:text-err-500">
             Tổng chi tiêu
           </div>
           <div className="num mt-0.5 text-lg tabular-nums text-err-600 dark:text-err-500">
-            {formatVND(stats.total_minor)}
+            {formatVND(totalExpense)}
           </div>
         </div>
         <div className="card-flat px-3 py-2.5">
           <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-500">
-            Trung bình / ngày
+            Ròng tháng
           </div>
-          <div className="num mt-0.5 text-lg tabular-nums text-ink-900 dark:text-inkDark-900">
-            {formatVND(stats.average_per_day)}
+          <div
+            className={`num mt-0.5 text-lg tabular-nums ${netMonth >= 0 ? 'text-ok-700 dark:text-ok-500' : 'text-err-600 dark:text-err-500'}`}
+          >
+            {netMonth >= 0 ? '+' : '−'}
+            {formatVND(Math.abs(netMonth))}
+          </div>
+          <div className="mt-0.5 text-2xs text-ink-500 dark:text-inkDark-500">
+            {netMonth >= 0 ? 'Dương' : 'Âm'}
           </div>
         </div>
         <div className="card-flat px-3 py-2.5">
@@ -180,7 +220,7 @@ export function MonthHeatmap({
                   tooltipId={tooltipId}
                   onHover={setHoveredKey}
                   onActivate={() => {
-                    if (cell.date && cell.amount_minor > 0) onDayClick(cell.date);
+                    if (cell.date && (cell.amount_minor > 0 || cell.income_minor > 0)) onDayClick(cell.date);
                   }}
                 />
               ))}
@@ -208,13 +248,32 @@ export function MonthHeatmap({
                 }).format(new Date(hovered.date))}
               </div>
               <div className="text-xs text-ink-500 dark:text-inkDark-500">
-                {hovered.count} giao dịch · {formatVND(hovered.amount_minor)}
+                {hovered.count} giao dịch ·{' '}
+                <span className="text-err-600 dark:text-err-500">−{formatVND(hovered.amount_minor)}</span>
+                {hovered.income_minor > 0 && (
+                  <>
+                    {' / '}
+                    <span className="text-ok-700 dark:text-ok-500">+{formatVND(hovered.income_minor)}</span>
+                  </>
+                )}
+                {' · ròng: '}
+                <span
+                  className={
+                    hovered.income_minor - hovered.amount_minor >= 0
+                      ? 'text-ok-700 dark:text-ok-500'
+                      : 'text-err-600 dark:text-err-500'
+                  }
+                >
+                  {hovered.income_minor - hovered.amount_minor >= 0 ? '+' : '−'}
+                  {formatVND(Math.abs(hovered.income_minor - hovered.amount_minor))}
+                </span>
               </div>
             </div>
             <div className="text-right">
               <div className="text-xs text-ink-500 dark:text-inkDark-500">
-                {max > 0 ? `${Math.round((hovered.amount_minor / max) * 100)}%` : '—'} so với ngày
-                cao nhất
+                {max > 0
+                  ? `${Math.round((Math.abs(hovered.amount_minor - hovered.income_minor) / max) * 100)}% so với ngày mạnh nhất`
+                  : '—'}
               </div>
             </div>
           </div>
@@ -226,18 +285,28 @@ export function MonthHeatmap({
       </div>
 
       {/* Legend gradient */}
-      <div className="flex items-center gap-2 text-xs text-ink-500 dark:text-inkDark-500">
-        <span>Ít</span>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-inkDark-500">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500" />
+          Dương
+        </span>
         <div className="flex h-3 overflow-hidden rounded border border-ink-200 dark:border-inkDark-200">
+          <div className="w-5 bg-emerald-700 dark:bg-emerald-800" />
+          <div className="w-5 bg-emerald-500 dark:bg-emerald-700" />
+          <div className="w-5 bg-emerald-100 dark:bg-emerald-900/55" />
+          <div className="w-5 bg-emerald-50 dark:bg-emerald-950/40" />
           <div className="w-5 bg-ink-50 dark:bg-inkDark-100" />
           <div className="w-5 bg-red-50 dark:bg-red-950/40" />
           <div className="w-5 bg-red-100 dark:bg-red-900/55" />
           <div className="w-5 bg-red-500 dark:bg-red-700" />
           <div className="w-5 bg-red-700 dark:bg-red-800" />
         </div>
-        <span>Nhiều</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500" />
+          Âm
+        </span>
         <span className="ml-3 text-ink-400 dark:text-inkDark-400">
-          ({stats.active_days} ngày có chi tiêu)
+          ({stats.active_days} ngày có giao dịch)
         </span>
       </div>
 
@@ -302,14 +371,25 @@ function CellView({
       />
     );
   }
-  const tone = intensityTone(cell.amount_minor, max);
-  const toneCls = TONE_CLASS[tone];
   const ringClass = cell.isToday ? 'ring-2 ring-brand-500 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark' : '';
   const opacityClass = cell.isFuture ? 'opacity-40' : '';
   const hasExpense = cell.amount_minor > 0;
-  const ariaLabel = hasExpense
-    ? `Ngày ${cell.day}, chi tiêu ${formatVND(cell.amount_minor)}, ${cell.count} giao dịch. Nhấn Enter để xem chi tiết.`
-    : `Ngày ${cell.day}, không có chi tiêu`;
+  const hasIncome = cell.income_minor > 0;
+  // deficit = expense - income. Dương (deficit > 0) → đỏ. Âm (deficit < 0, dư) → xanh.
+  const deficit = cell.amount_minor - cell.income_minor;
+  const tone = intensityTone(deficit, max);
+  const toneCls = deficit > 0
+    ? RED_TONE_CLASS[tone]
+    : deficit < 0
+      ? GREEN_TONE_CLASS[tone]
+      : RED_TONE_CLASS[0];
+  const ariaLabel = hasExpense && hasIncome
+    ? `Ngày ${cell.day}, chi tiêu ${formatVND(cell.amount_minor)}, thu nhập ${formatVND(cell.income_minor)}, ${cell.count} giao dịch. Nhấn Enter để xem chi tiết.`
+    : hasExpense
+      ? `Ngày ${cell.day}, chi tiêu ${formatVND(cell.amount_minor)}, ${cell.count} giao dịch. Nhấn Enter để xem chi tiết.`
+      : hasIncome
+        ? `Ngày ${cell.day}, thu nhập ${formatVND(cell.income_minor)}. Nhấn Enter để xem chi tiết.`
+        : `Ngày ${cell.day}, không có giao dịch`;
   return (
     <button
       type="button"
@@ -321,13 +401,18 @@ function CellView({
       onFocus={() => onHover(cell.date)}
       onBlur={() => onHover(null)}
       onClick={onActivate}
-      disabled={!hasExpense}
-      className={`group relative aspect-square rounded border border-ink-200 px-1 py-0.5 text-left text-[10px] transition focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-inkDark-200 ${hasExpense ? 'cursor-pointer hover:scale-[1.04] hover:shadow-sm' : 'cursor-default'} ${toneCls} ${ringClass} ${opacityClass}`}
+      disabled={!hasExpense && !hasIncome}
+      className={`group relative aspect-square rounded border border-ink-200 px-1 py-0.5 text-left text-[10px] transition focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-inkDark-200 ${hasExpense || hasIncome ? 'cursor-pointer hover:scale-[1.04] hover:shadow-sm' : 'cursor-default'} ${toneCls} ${ringClass} ${opacityClass}`}
     >
       <div className="font-semibold leading-none">{cell.day}</div>
       {hasExpense && (
         <div className="absolute bottom-0.5 right-1 text-[9px] font-medium leading-none tabular-nums">
-          {compactVNDMinor(cell.amount_minor)}
+          −{compactVNDMinor(cell.amount_minor)}
+        </div>
+      )}
+      {hasIncome && (
+        <div className="absolute top-0.5 left-1 text-[9px] font-medium leading-none tabular-nums text-ok-700 dark:text-ok-400">
+          +{compactVNDMinor(cell.income_minor)}
         </div>
       )}
     </button>

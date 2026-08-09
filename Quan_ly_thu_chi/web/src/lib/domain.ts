@@ -64,8 +64,11 @@ export type FinancialAccount = {
   version: number;
 };
 
+export type CategoryScope = 'global' | 'user';
+
 export type Category = {
   id: string;
+  scope: CategoryScope; // 'global' = bảng global_categories (share), 'user' = bảng categories riêng
   user_id: string | null;
   name: string;
   kind: CategoryKind;
@@ -80,6 +83,9 @@ export type Category = {
   version: number;
 };
 
+/** Prefix id để phân biệt global vs user khi share 1 không gian UUID. */
+export const GLOBAL_CATEGORY_PREFIX = 'global:';
+
 export type Transaction = {
   id: string;
   user_id: string;
@@ -89,6 +95,7 @@ export type Transaction = {
   amount_minor: number;
   currency: string;
   category_id: string | null;
+  global_category_id: string | null;
   payee: string | null;
   note: string | null;
   source: TransactionSource;
@@ -165,6 +172,7 @@ export type RecurringRule = {
   start_date: string;
   end_date: string | null;
   category_id: string | null;
+  global_category_id: string | null;
   payee: string | null;
   note: string | null;
   day_of_month: number | null;
@@ -233,4 +241,84 @@ export type BankEvent = {
   received_at: string;
   payload: Record<string, unknown>;
   payload_hash: string;
+};
+
+// ============================================================
+// People & Debts (Quản lý công nợ đơn giản)
+// ============================================================
+
+export type DebtType = 'lend' | 'borrow';
+export type DebtStatus = 'active' | 'paid';
+
+// ============================================================
+// Bills (chụp bill siêu thị / hoá đơn mua sắm — 1:1 với transaction)
+// ============================================================
+
+export type BillChannel = 'online' | 'offline';
+export type OnlineMarketplace = 'shopee' | 'lazada' | 'tiktok_shop' | 'other';
+
+export type Bill = {
+  id: string;
+  user_id: string;
+  transaction_id: string;
+  channel_type: BillChannel;
+  online_marketplace: OnlineMarketplace | null;
+  online_marketplace_other: string | null;
+  store_name: string | null;
+  declared_total_minor: number;
+  item_count: number;
+  raw_ocr: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  version: number;
+};
+
+export type BillItem = {
+  id: string;
+  bill_id: string;
+  user_id: string;
+  position: number;
+  product_name: string;
+  quantity: number;
+  unit_price_minor: number;
+  line_total_minor: number;
+  note: string | null;
+  created_at: string;
+};
+
+export type BillWithItems = {
+  bill: Bill;
+  items: BillItem[];
+};
+
+export type Person = {
+  id: string;
+  user_id: string;
+  name: string;
+  phone: string | null;
+  created_at: string;
+};
+
+export type Debt = {
+  id: string;
+  user_id: string;
+  person_id: string | null;  // nullable for backwards compat
+  type: DebtType;
+  counterparty_name: string;  // NOT NULL in DB
+  counterparty_phone?: string | null;  // legacy field
+  original_amount: number;
+  remaining_amount: number;
+  status: DebtStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DebtPayment = {
+  id: string;
+  debt_id: string;
+  amount: number;
+  payment_date: string;
+  note?: string | null;
+  created_at: string;
 };
