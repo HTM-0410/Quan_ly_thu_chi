@@ -178,11 +178,11 @@ export async function listCategories(): Promise<Category[]> {
     user_id: null,
     name: g.name,
     kind: g.kind,
-    parent_id: null,
+    parent_id: g.parent_id ? `${GLOBAL_CATEGORY_PREFIX}${g.parent_id}` : null,
     icon: g.icon ?? 'category',
     color: g.color ?? '#757575',
     is_system: true,
-    is_archived: false,
+    is_archived: !g.is_active,
     sort_order: g.sort_order,
     created_at: g.created_at,
     updated_at: g.updated_at,
@@ -230,8 +230,70 @@ export async function deleteCategory(id: string) {
   if (id.startsWith(GLOBAL_CATEGORY_PREFIX)) {
     throw new Error('Không thể xóa danh mục hệ thống toàn cục');
   }
+  // Bảo vệ dữ liệu: nếu CHA có CON thì không xóa CHA (gỡ CON trước).
+  const { count: childCount } = await supabase
+    .from('categories')
+    .select('id', { count: 'exact', head: true })
+    .eq('parent_id', id);
+  if ((childCount ?? 0) > 0) {
+    throw new Error('Bạn cần xoá hoặc di chuyển các danh mục con trước.');
+  }
+  // Bảo vệ dữ liệu: nếu còn giao dịch trỏ tới category này thì cảnh báo.
+  const { count: txCount } = await supabase
+    .from('transactions')
+    .select('id', { count: 'exact', head: true })
+    .or(`category_id.eq.${id},global_category_id.eq.${id}`);
+  if ((txCount ?? 0) > 0) {
+    throw new Error(
+      'Danh mục đang được sử dụng bởi giao dịch. Hãy đổi sang danh mục khác trước khi xoá.',
+    );
+  }
   const { error } = await supabase.from('categories').delete().eq('id', id);
   if (error) throw error;
+}
+
+/**
+ * Trả về map<categoryId, {direct, tree}> đếm số giao dịch user.
+ * - `direct`: tx gắn trực tiếp vào category này
+ * - `tree`:   tx gắn vào category này + tất cả CON cháu
+ */
+export async function getCategoryUsageCounts(
+  ids: string[],
+): Promise<Record<string, { direct: number; tree: number }>> {
+  if (ids.length === 0) return {};
+  const { data: session } = await supabase.auth.getSession();
+  const userId = session.session?.user.id;
+  if (!userId) throw new Error('Not authenticated');
+
+  // RPC nhận UUID[]; strip prefix `global:` để lấy realId.
+  const realIds = ids.map(id => splitCategoryId(id).realId).filter(Boolean) as string[];
+
+  const { data, error } = await supabase.rpc('get_category_usage_counts' as never, {
+    p_category_ids: realIds,
+    p_user_id: userId,
+  } as never);
+  if (error) throw error;
+  const rows = (data ?? []) as Array<{
+    category_id: string;
+    direct_count: number | string;
+    tree_count: number | string;
+  }>;
+  const map: Record<string, { direct: number; tree: number }> = {};
+  for (const r of rows) {
+    // Trả lại key với prefix để match id frontend gửi
+    const key = ids.find(id => splitCategoryId(id).realId === r.category_id);
+    if (key) {
+      map[key] = {
+        direct: Number(r.direct_count),
+        tree: Number(r.tree_count),
+      };
+    }
+  }
+  // Fill missing → 0
+  for (const id of ids) {
+    if (!map[id]) map[id] = { direct: 0, tree: 0 };
+  }
+  return map;
 }
 
 /**

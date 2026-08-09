@@ -63,6 +63,7 @@ export interface Database {
         kind: 'income' | 'expense' | 'both';
         icon: string | null;
         color: string | null;
+        parent_id: string | null;
         sort_order: number;
         is_active: boolean;
         created_at: string;

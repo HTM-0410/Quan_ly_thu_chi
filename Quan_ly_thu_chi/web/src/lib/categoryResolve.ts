@@ -37,3 +37,31 @@ export function categoryKey(
   if (tx.category_id) return tx.category_id;
   return null;
 }
+
+/** Tên các CHA có gắn bill (mẹ của cây con cần attach bill). */
+export const BILLABLE_PARENT_CATEGORY_NAMES = ['Mua sắm', 'Đi chợ/Siêu thị'];
+
+/**
+ * True nếu `cat` nằm trong nhóm "billable":
+ * - Cat có name trùng 1 trong BILLABLE_PARENT_CATEGORY_NAMES (CHA billable), HOẶc
+ * - Cat là CON (parent_id != null) của CHA có name trùng danh sách trên.
+ *
+ * @param cat - Category cần kiểm tra (có thể null/undefined)
+ * @param categoryById - Map lookup Category (để resolve CHA từ parent_id)
+ */
+export function isBillableCategory(
+  cat: Category | null | undefined,
+  categoryById: ReadonlyMap<string, Category>,
+): boolean {
+  if (!cat) return false;
+  const n = cat.name.trim().toLowerCase();
+  if (BILLABLE_PARENT_CATEGORY_NAMES.some(x => x.toLowerCase() === n)) return true;
+  if (cat.parent_id) {
+    const parent = categoryById.get(cat.parent_id);
+    if (parent) {
+      const pn = parent.name.trim().toLowerCase();
+      return BILLABLE_PARENT_CATEGORY_NAMES.some(x => x.toLowerCase() === pn);
+    }
+  }
+  return false;
+}

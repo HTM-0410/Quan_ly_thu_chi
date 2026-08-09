@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import clsx from 'clsx';
 import { AlertTriangle, Check, Plus, Share2, ShoppingBag, Store, X } from 'lucide-react';
+import { CategoryPicker } from '../CategoryPicker';
 import type { Category, FinancialAccount, Person } from '../../lib/types';
 import { TRANSACTION_TYPE_LABEL } from '../../lib/labels';
 import { parseVNDInput, formatVNDInput } from '../../lib/format';
@@ -11,12 +12,29 @@ export interface TransactionSplit {
   amount_minor: number;
 }
 
-/** Tên danh mục "Mua sắm" — khớp với SHOPPING_CATEGORY_NAME ở TransactionsPage. */
-const SHOPPING_CATEGORY_NAME = 'Mua sắm';
+/** Tên danh mục có gắn bill — user có thể đính kèm bill (hóa đơn mua hàng). */
+const BILLABLE_CATEGORY_NAMES = ['Mua sắm', 'Đi chợ/Siêu thị'];
 
-/** True nếu category là "Mua sắm" (case-insensitive, trim). */
-function isShoppingCategory(cat: { name: string } | null | undefined): boolean {
-  return !!cat && cat.name.trim().toLowerCase() === SHOPPING_CATEGORY_NAME.toLowerCase();
+/**
+ * True nếu category thuộc nhóm có gắn bill (CHA 'Mua sắm' / 'Đi chợ/Siêu thị'
+ * hoặc CON trực tiếp của 1 trong 2 CHA đó).
+ * Cần categoryById để resolve CHA khi cat là CON.
+ */
+function isShoppingCategory(
+  cat: { name: string; parent_id?: string | null } | null | undefined,
+  categoryById: ReadonlyMap<string, Category>,
+): boolean {
+  if (!cat) return false;
+  const n = cat.name.trim().toLowerCase();
+  if (BILLABLE_CATEGORY_NAMES.some(x => x.toLowerCase() === n)) return true;
+  if (cat.parent_id) {
+    const parent = categoryById.get(cat.parent_id);
+    if (parent) {
+      const pn = parent.name.trim().toLowerCase();
+      return BILLABLE_CATEGORY_NAMES.some(x => x.toLowerCase() === pn);
+    }
+  }
+  return false;
 }
 
 const MARKETPLACE_OPTIONS: Array<{ id: OnlineMarketplace; label: string }> = [
@@ -107,13 +125,6 @@ export function ReceiptPreviewTable({
   categories,
   people = [],
 }: ReceiptPreviewTableProps) {
-  const filteredCatsByType = useMemo(() => {
-    const map = new Map<'income' | 'expense', Category[]>();
-    map.set('income', categories.filter(c => c.kind === 'income' || c.kind === 'both'));
-    map.set('expense', categories.filter(c => c.kind === 'expense' || c.kind === 'both'));
-    return map;
-  }, [categories]);
-
   const accountById = useMemo(() => {
     const map = new Map<string, FinancialAccount>();
     accounts.forEach(a => map.set(a.id, a));
@@ -167,7 +178,7 @@ export function ReceiptPreviewTable({
 
   /** Khi user chọn category = Mua sắm, row trở nên invalid cho tới khi chọn channel. */
   function isShoppingBillValid(row: PreviewRow): boolean {
-    if (!isShoppingCategory(categoryById.get(row.category_id))) return true;
+    if (!isShoppingCategory(categoryById.get(row.category_id), categoryById)) return true;
     return isBillComplete(row);
   }
 
@@ -238,9 +249,9 @@ export function ReceiptPreviewTable({
       const target = next.find(r => r.id === id);
       if (target) {
         const cat = categoryById.get(patch.category_id ?? '');
-        if (isShoppingCategory(cat) && !target.bill) {
+        if (isShoppingCategory(cat, categoryById) && !target.bill) {
           target.bill = { channel: null, marketplace: null, marketplace_other: null, store_name: null, has_bill: true };
-        } else if (!isShoppingCategory(cat) && target.bill) {
+        } else if (!isShoppingCategory(cat, categoryById) && target.bill) {
           target.bill = null;
         }
       }
@@ -645,19 +656,15 @@ export function ReceiptPreviewTable({
                   <label className="mb-0.5 block text-2xs font-medium uppercase tracking-wide text-ink-500 dark:text-inkDark-500">
                     Danh mục
                   </label>
-                  <select
-                    aria-label="Danh mục"
-                    className="input !py-1 !text-xs w-full"
+                  <CategoryPicker
+                    categories={categories}
+                    kind={r.type}
                     value={r.category_id}
-                    onChange={e => update(r.id, { category_id: e.target.value })}
-                  >
-                    <option value="">--</option>
-                    {filteredCatsByType.get(r.type)?.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={id => update(r.id, { category_id: id })}
+                    label="Danh mục"
+                    placeholder="--"
+                    clearable
+                  />
                 </div>
 
                 {/* Chia sẻ - tạo nợ */}
@@ -761,8 +768,8 @@ export function ReceiptPreviewTable({
                 </div>
               </div>
 
-              {/* Hàng 3: Bill picker — chỉ hiện khi danh mục = Mua sắm */}
-              {isShoppingCategory(categoryById.get(r.category_id)) && (
+              {/* Hàng 3: Bill picker — chỉ hiện khi danh mục = Mua sắm / Đi chợ (CHA hoặc CON) */}
+              {isShoppingCategory(categoryById.get(r.category_id), categoryById) && (
                 <BillInlinePicker
                   bill={r.bill ?? null}
                   onChange={patch => updateBill(r.id, patch)}

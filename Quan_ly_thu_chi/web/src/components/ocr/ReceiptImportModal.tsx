@@ -137,12 +137,22 @@ export function ReceiptImportModal({
     return m;
   }, [categories]);
 
-  /** True nếu category có name = "Mua sắm" (case-insensitive). */
+  /** True nếu category thuộc nhóm billable (CHA 'Mua sắm' / 'Đi chợ/Siêu thị' hoặc CON của 1 trong 2). */
   const isShoppingCategoryLocal = useCallback(
     (catId: string | null | undefined): boolean => {
       if (!catId) return false;
       const cat = categoryById.get(catId);
-      return !!cat && cat.name.trim().toLowerCase() === 'mua sắm';
+      if (!cat) return false;
+      const n = cat.name.trim().toLowerCase();
+      if (n === 'mua sắm' || n === 'đi chợ/siêu thị') return true;
+      if (cat.parent_id) {
+        const parent = categoryById.get(cat.parent_id);
+        if (parent) {
+          const pn = parent.name.trim().toLowerCase();
+          return pn === 'mua sắm' || pn === 'đi chợ/siêu thị';
+        }
+      }
+      return false;
     },
     [categoryById],
   );
@@ -495,7 +505,7 @@ export function ReceiptImportModal({
         }
       }
       if (billCount > 0) {
-        toast.push('success', `Đã tạo ${billCount} bill mua sắm`);
+        toast.push('success', `Đã tạo ${billCount} bill (mua sắm / đi chợ)`);
       }
 
       // Create debts for split_share rows

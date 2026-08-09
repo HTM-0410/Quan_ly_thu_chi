@@ -19,6 +19,7 @@ import { FormField } from '../components/FormField';
 import { EmptyState, ErrorState, Skeleton } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
 import { CategoryIcon } from '../components/CategoryIcon';
+import { CategoryPicker } from '../components/CategoryPicker';
 import { AccountIcon } from '../components/AccountIcon';
 import { ColumnFilterTrigger } from '../components/ColumnFilter';
 import { useToast } from '../components/Toast';
@@ -58,13 +59,28 @@ import type { Category, Debt, FinancialAccount, Transaction } from '../lib/types
 type Tab = 'all' | 'income' | 'expense' | 'transfer';
 type FormMode = 'manual' | 'transfer' | 'ocr';
 
-/** Tên danh mục "Mua sắm" được seed mặc định trong seed_default_categories. */
-const SHOPPING_CATEGORY_NAME = 'Mua sắm';
+/** Tên danh mục có gắn bill — user có thể đính kèm bill (hóa đơn mua hàng). */
+const BILLABLE_CATEGORY_NAMES = ['Mua sắm', 'Đi chợ/Siêu thị'];
 
-/** True nếu category là "Mua sắm" (case-insensitive, trim). */
-function isShoppingCategory(cat: { name: string } | null | undefined): boolean {
-  return !!cat && cat.name.trim().toLowerCase() === SHOPPING_CATEGORY_NAME.toLowerCase();
+/** True nếu category thuộc nhóm có gắn bill (case-insensitive, trim). */
+function isShoppingCategory(
+  cat: { name: string; parent_id?: string | null } | null | undefined,
+  categoryById?: ReadonlyMap<string, { name: string }>,
+): boolean {
+  if (!cat) return false;
+  const n = cat.name.trim().toLowerCase();
+  if (BILLABLE_CATEGORY_NAMES.some(x => x.toLowerCase() === n)) return true;
+  if (cat.parent_id && categoryById) {
+    const parent = categoryById.get(cat.parent_id);
+    if (parent) {
+      const pn = parent.name.trim().toLowerCase();
+      return BILLABLE_CATEGORY_NAMES.some(x => x.toLowerCase() === pn);
+    }
+  }
+  return false;
 }
+
+const SHOPPING_CATEGORY_NAME = 'Mua sắm';
 
 export function TransactionsPage() {
   useDocumentTitle('Giao dịch');
@@ -1026,17 +1042,24 @@ function ManualTransactionModal({
   const [submitting, setSubmitting] = useState(false);
   const [amountError, setAmountError] = useState<string | null>(null);
 
-  // Bill state (chỉ dùng khi category = Mua sắm và đang ở chế độ edit GD expense)
+  // Lookup CHA từ parent_id khi check category billable (CON của Mua sắm / Đi chợ).
+  const categoryById = useMemo(() => {
+    const m = new Map<string, Category>();
+    categories.forEach(c => m.set(c.id, c));
+    return m;
+  }, [categories]);
+
+  // Bill state (chỉ dùng khi category = Mua sắm / Đi chợ và đang ở chế độ edit GD expense)
   const [billLoading, setBillLoading] = useState(false);
 
-  // Load bill khi mở form edit GD expense có category = Mua sắm
+  // Load bill khi mở form edit GD expense có category = Mua sắm / Đi chợ
   useEffect(() => {
     if (!isEdit || !tx) {
       setBill(null);
       return;
     }
     const cat = categories.find(c => c.id === categoryId);
-    if (!isShoppingCategory(cat)) {
+    if (!isShoppingCategory(cat, categoryById)) {
       setBill(null);
       return;
     }
@@ -1087,10 +1110,8 @@ function ManualTransactionModal({
 
   const selectedDebt = activeDebts.find(d => d.id === selectedDebtId);
 
-  const filteredCats = useMemo(
-    () => categories.filter(c => c.kind === type || c.kind === 'both'),
-    [categories, type],
-  );
+  // Picker cây CHA/CON: user chọn trực tiếp CHA hoặc CON trong popup cây.
+  // selectedCategory vẫn giữ để các phần khác (Bill mua sắm, "Sẽ gắn nhãn") dùng.
   const selectedCategory = categories.find(c => c.id === categoryId) ?? null;
 
   async function submit() {
@@ -1239,23 +1260,18 @@ function ManualTransactionModal({
             </select>
           </FormField>
           <FormField label="Danh mục">
-            <select
-              className="input"
+            <CategoryPicker
+              categories={categories}
+              kind={type}
               value={categoryId}
-              onChange={e => setCategoryId(e.target.value)}
-            >
-              <option value="">-- Chọn danh mục --</option>
-              {filteredCats.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={setCategoryId}
+              placeholder="Chọn danh mục…"
+            />
           </FormField>
         </div>
 
-        {/* Bill mua sắm — chỉ hiện khi đang sửa GD expense có category = Mua sắm */}
-        {isEdit && isShoppingCategory(selectedCategory) && (
+        {/* Bill mua sắm — chỉ hiện khi đang sửa GD expense có category = Mua sắm / Đi chợ (CHA hoặc CON) */}
+        {isEdit && isShoppingCategory(selectedCategory, categoryById) && (
           <div className="rounded-card border border-brand-200 bg-brand-50/30 p-3 dark:border-brand-800 dark:bg-brand-500/5">
             <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300">
               <Receipt size={12} strokeWidth={1.75} />
