@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { GLOBAL_CATEGORY_PREFIX } from './domain';
 import { calculateInitialNextOccurrence } from './recurringSchedule';
+import { uuid } from './format';
 import type {
   FinancialAccount,
   Category,
@@ -519,7 +520,7 @@ export async function createManualTransaction(input: {
 
   // Một nghiệp vụ chỉ có một operation key. Retry/conflict/unknown result phải
   // dùng lại đúng key để RPC trả kết quả cũ thay vì tạo giao dịch mới.
-  const clientGeneratedId = input.client_generated_id ?? crypto.randomUUID();
+  const clientGeneratedId = input.client_generated_id ?? uuid();
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data, error } = await supabase.rpc('create_manual_transaction', {
@@ -622,7 +623,7 @@ export async function createTransfer(input: {
   note?: string | null;
 }) {
   const { data, error } = await supabase.rpc('create_transfer', {
-    p_client_generated_id: crypto.randomUUID(),
+    p_client_generated_id: uuid(),
     p_from_account_id: input.from_account_id,
     p_to_account_id: input.to_account_id,
     p_amount_minor: input.amount_minor,
@@ -917,7 +918,7 @@ export async function addGoalContribution(input: {
     p_amount_minor: input.amount_minor,
     p_occurred_at: input.occurred_at ?? new Date().toISOString(),
     p_note: input.note ?? null,
-    p_client_generated_id: input.client_generated_id ?? crypto.randomUUID(),
+    p_client_generated_id: input.client_generated_id ?? uuid(),
   });
   if (error) throw error;
   return data as string;
@@ -1471,7 +1472,7 @@ export interface SettleDebtPaymentResult {
 export async function settleDebtPayment(
   input: SettleDebtPaymentInput,
 ): Promise<SettleDebtPaymentResult> {
-  const cid = input.idempotency_key ?? crypto.randomUUID();
+  const cid = input.idempotency_key ?? uuid();
 
   const { data, error } = await supabase.rpc('settle_debt_payment', {
     p_debt_id: input.debt_id,

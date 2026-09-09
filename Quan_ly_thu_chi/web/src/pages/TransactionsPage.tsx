@@ -65,6 +65,7 @@ import {
   formatVND,
   fromLocalDateTimeInput,
   toLocalDateTimeInput,
+  uuid,
 } from '../lib/format';
 import { TRANSACTION_TYPE_LABEL } from '../lib/labels';
 import { resolveCategory, categoryKey } from '../lib/categoryResolve';
@@ -1419,7 +1420,7 @@ export function ManualTransactionModal({
   // One form submission is one operation. Keep this key while the modal stays
   // open so an unknown result followed by a user retry cannot create a second
   // transaction.
-  const [operationId] = useState(() => crypto.randomUUID());
+  const [operationId] = useState(() => uuid());
 
   // Lookup CHA từ parent_id khi check category billable (CON của Mua sắm / Đi chợ).
   const categoryById = useMemo(() => {

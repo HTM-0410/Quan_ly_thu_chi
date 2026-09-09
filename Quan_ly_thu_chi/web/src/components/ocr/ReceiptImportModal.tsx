@@ -36,7 +36,7 @@ import {
   type OcrAtomicSplit,
 } from '../../lib/ocrAtomic';
 // force-refresh: 2026-08-02T22:52
-import { toLocalDateTimeInput, fromLocalDateTimeInput, formatVND } from '../../lib/format';
+import { toLocalDateTimeInput, fromLocalDateTimeInput, formatVND, uuid } from '../../lib/format';
 import type { Category, FinancialAccount, Person } from '../../lib/types';
 
 type Step = 'upload' | 'processing' | 'preview';
@@ -360,7 +360,7 @@ export function ReceiptImportModal({
               (runningBalance ?? 0) + (type === 'income' ? t.amount_minor : -t.amount_minor);
           }
           return {
-            id: crypto.randomUUID(),
+            id: uuid(),
             image_id: job.image.id,
             selected,
             type,
@@ -515,7 +515,7 @@ export function ReceiptImportModal({
             global_category_id: categoryFields.global_category_id,
           };
 
-          const rowCid = row.client_generated_id || crypto.randomUUID();
+          const rowCid = row.client_generated_id || uuid();
           row.client_generated_id = rowCid;
           const rowHex = rowCid.replace(/-/g, '').padEnd(32, '0');
 

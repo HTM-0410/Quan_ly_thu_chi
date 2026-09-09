@@ -8,7 +8,7 @@ import {
   listAccounts,
   settleDebtPayment,
 } from '../lib/api';
-import { formatVND, unwrapError } from '../lib/format';
+import { formatVND, unwrapError, uuid } from '../lib/format';
 import clsx from 'clsx';
 import type { Debt, FinancialAccount } from '../lib/types';
 
@@ -92,7 +92,7 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
         payment_date: paymentDateRef.current ?? (paymentDateRef.current = new Date().toISOString()),
         note: `Thanh toán khoản ${debt.type === 'lend' ? 'cho vay' : 'vay'} - ${personName}`,
         // Giữ nguyên key nếu người dùng retry sau timeout/unknown result.
-        idempotency_key: idempotencyKeyRef.current ?? (idempotencyKeyRef.current = crypto.randomUUID()),
+        idempotency_key: idempotencyKeyRef.current ?? (idempotencyKeyRef.current = uuid()),
       });
 
       const isLend = debt.type === 'lend';

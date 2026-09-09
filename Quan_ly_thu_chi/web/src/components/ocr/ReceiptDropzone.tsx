@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { ImagePlus, X } from 'lucide-react';
+import { uuid } from '../../lib/format';
 
 export interface StagedImage {
   /** Unique id dùng cho React key + lookup state. */
@@ -17,7 +18,23 @@ interface ReceiptDropzoneProps {
   disabled?: boolean;
 }
 
-const ACCEPT_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const ACCEPT_MIME = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/heic',
+  'image/heif',
+];
+
+function isAcceptedImage(file: File): boolean {
+  if (file.type) {
+    const t = file.type.toLowerCase();
+    if (ACCEPT_MIME.includes(t) || t.startsWith('image/')) return true;
+  }
+  const ext = (file.name.toLowerCase().split('.').pop() || '').trim();
+  return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'].includes(ext);
+}
 
 export function ReceiptDropzone({
   images,
@@ -40,19 +57,19 @@ export function ReceiptDropzone({
       }
       const valid: File[] = [];
       for (const f of list.slice(0, remaining)) {
-        if (!ACCEPT_MIME.includes(f.type)) {
-          setError(`Bỏ qua file ${f.name}: chỉ hỗ trợ JPEG/PNG/WebP/GIF`);
+        if (!isAcceptedImage(f)) {
+          setError(`Bỏ qua file ${f.name}: chỉ hỗ trợ JPEG/PNG/WebP/GIF/HEIC`);
           continue;
         }
-        if (f.size > 8 * 1024 * 1024) {
-          setError(`Bỏ qua file ${f.name}: lớn hơn 8MB`);
+        if (f.size > 15 * 1024 * 1024) {
+          setError(`Bỏ qua file ${f.name}: lớn hơn 15MB`);
           continue;
         }
         valid.push(f);
       }
       if (valid.length === 0) return;
       const next: StagedImage[] = valid.map(file => ({
-        id: crypto.randomUUID(),
+        id: uuid(),
         file,
         previewUrl: URL.createObjectURL(file),
       }));
@@ -97,26 +114,25 @@ export function ReceiptDropzone({
 
   return (
     <div className="space-y-3">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => inputRef.current?.click()}
+      <label
         onDragOver={e => {
+          if (disabled) return;
           e.preventDefault();
           setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={e => {
+          if (disabled) return;
           e.preventDefault();
           setDragOver(false);
           if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
         }}
         className={clsx(
-          'flex w-full flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed px-6 py-10 text-sm transition',
+          'flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed px-6 py-10 text-sm transition select-none',
           dragOver
             ? 'border-brand-500 bg-brand-50/40 dark:bg-brand-500/10'
             : 'border-ink-200 bg-surface-sunken hover:border-ink-300 dark:border-ink-700 dark:bg-surface-dark-sunken dark:hover:border-ink-600',
-          disabled && 'pointer-events-none opacity-50',
+          disabled && 'pointer-events-none opacity-50 cursor-not-allowed',
         )}
       >
         <ImagePlus size={28} className="text-ink-400 dark:text-inkDark-400" strokeWidth={1.5} />
@@ -124,20 +140,23 @@ export function ReceiptDropzone({
           Kéo thả, dán từ clipboard, hoặc bấm để chọn ảnh
         </div>
         <div className="text-xs text-ink-500 dark:text-inkDark-500">
-          JPEG/PNG/WebP · tối đa {maxImages} ảnh · &lt; 8MB mỗi ảnh
+          JPEG/PNG/WebP/HEIC · tối đa {maxImages} ảnh · &lt; 15MB mỗi ảnh
         </div>
         <input
           ref={inputRef}
           type="file"
-          accept={ACCEPT_MIME.join(',')}
+          accept="image/*,.heic,.heif"
           multiple
-          hidden
+          disabled={disabled}
+          className="sr-only"
           onChange={e => {
-            if (e.target.files) addFiles(e.target.files);
+            if (e.target.files && e.target.files.length > 0) {
+              addFiles(e.target.files);
+            }
             e.target.value = '';
           }}
         />
-      </button>
+      </label>
 
       {error && (
         <p role="alert" className="text-xs font-medium text-err-600 dark:text-err-500">
@@ -160,8 +179,11 @@ export function ReceiptDropzone({
               <button
                 type="button"
                 aria-label="Xoá ảnh"
-                onClick={() => remove(img.id)}
-                className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white opacity-0 transition hover:bg-black/80 group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  remove(img.id);
+                }}
+                className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white opacity-90 sm:opacity-0 transition hover:bg-black/80 sm:group-hover:opacity-100"
               >
                 <X size={12} strokeWidth={2.25} />
               </button>

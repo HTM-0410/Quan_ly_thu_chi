@@ -129,8 +129,8 @@ async function fileToCompressedBase64(
   });
 
   const { mime, base64 } = splitDataUrl(dataUrl);
-  if (!/^image\/(jpeg|png|webp|gif)$/i.test(mime)) {
-    throw new BillOcrParseError(`Định dạng ảnh không hỗ trợ: ${mime}. Dùng JPEG/PNG/WebP.`);
+  if (!/^image\/(jpeg|png|webp|gif|heic|heif)$/i.test(mime) && !mime.startsWith('image/')) {
+    throw new BillOcrParseError(`Định dạng ảnh không hỗ trợ: ${mime}. Dùng JPEG/PNG/WebP/HEIC.`);
   }
   if (file.size > 15 * 1024 * 1024) {
     throw new BillOcrParseError('Ảnh quá lớn (>15MB). Vui lòng nén hoặc chọn ảnh khác.');
