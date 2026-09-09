@@ -4,7 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="theme-color" content="#faf7f2" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#15110d" media="(prefers-color-scheme: dark)" />
 
@@ -16,7 +19,7 @@
       rel="stylesheet"
     />
 
-    <!-- Anti-flash theme bootstrap (runs before React mounts) -->
+    <!-- Anti-flash theme bootstrap (runs before React mounts) & iOS zoom prevention -->
     <script>
       (function () {
         try {
@@ -26,6 +29,11 @@
             mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
           if (resolved) document.documentElement.classList.add('dark');
         } catch (_) {}
+
+        // Vô hiệu hóa cử chỉ phóng to đa điểm (pinch-to-zoom) trên iOS Safari
+        document.addEventListener('gesturestart', function (e) {
+          e.preventDefault();
+        });
       })();
     </script>
 

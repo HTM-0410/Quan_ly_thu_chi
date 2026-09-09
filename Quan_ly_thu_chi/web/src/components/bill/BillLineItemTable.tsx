@@ -273,7 +273,7 @@ export function BillLineItemTable({
                       type="text"
                       aria-label={`Tên sản phẩm dòng ${idx + 1}`}
                       className={clsx(
-                        'input !py-1 !text-xs w-full',
+                        'input !py-1 text-base sm:!text-xs w-full',
                         !it.product_name.trim() && '!border-err-500',
                       )}
                       value={it.product_name}
@@ -299,7 +299,7 @@ export function BillLineItemTable({
                       type="text"
                       inputMode="decimal"
                       aria-label={`Số lượng dòng ${idx + 1}`}
-                      className="input !py-1 !text-xs w-full text-right tabular-nums"
+                      className="input !py-1 text-base sm:!text-xs w-full text-right tabular-nums"
                       value={String(it.quantity)}
                       onChange={e => {
                         const v = Number(e.target.value.replace(',', '.'));
@@ -313,7 +313,7 @@ export function BillLineItemTable({
                       type="text"
                       inputMode="numeric"
                       aria-label={`Đơn giá dòng ${idx + 1}`}
-                      className="input !py-1 !text-xs w-full text-right tabular-nums"
+                      className="input !py-1 text-base sm:!text-xs w-full text-right tabular-nums"
                       value={formatVNDInput((it.unit_price_minor / 100).toString())}
                       onChange={e =>
                         update(idx, {
@@ -328,7 +328,7 @@ export function BillLineItemTable({
                       type="text"
                       inputMode="numeric"
                       aria-label={`Thành tiền dòng ${idx + 1}`}
-                      className="input !py-1 !text-xs w-full text-right tabular-nums"
+                      className="input !py-1 text-base sm:!text-xs w-full text-right tabular-nums"
                       value={formatVNDInput((it.line_total_minor / 100).toString())}
                       onChange={e =>
                         update(idx, {

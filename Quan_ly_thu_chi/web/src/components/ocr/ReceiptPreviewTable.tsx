@@ -400,7 +400,7 @@ export function ReceiptPreviewTable({
         </ul>
       )}
 
-      <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1 pb-10">
+      <div className="max-h-[60vh] space-y-2 overflow-y-auto overflow-x-hidden touch-pan-y pr-1 pb-10">
         {rows.map(r => {
           const valid = isRowValid(r);
           const lowConf = r.confidence < 0.6;
@@ -434,7 +434,7 @@ export function ReceiptPreviewTable({
                 <select
                   aria-label="Loại giao dịch"
                   className={clsx(
-                    'input !py-1 !text-xs font-medium w-24 shrink-0',
+                    'input !py-1 text-base sm:!text-xs font-medium w-24 shrink-0',
                     r.type === 'income'
                       ? 'text-ok-700 dark:text-ok-500'
                       : 'text-err-700 dark:text-err-500',
@@ -500,7 +500,7 @@ export function ReceiptPreviewTable({
                   <input
                     type="datetime-local"
                     aria-label="Thời gian"
-                    className="input !py-1 !text-xs w-full"
+                    className="input !py-1 text-base sm:!text-xs w-full"
                     value={r.occurred_at_local}
                     onChange={e => update(r.id, { occurred_at_local: e.target.value })}
                   />
@@ -514,7 +514,7 @@ export function ReceiptPreviewTable({
                     type="text"
                     inputMode="numeric"
                     aria-label="Số tiền VND"
-                    className="input !py-1 !text-xs tabular-nums w-full"
+                    className="input !py-1 text-base sm:!text-xs tabular-nums w-full"
                     value={formatVNDInput(amountMajor)}
                     onChange={e =>
                       update(r.id, {
@@ -531,7 +531,7 @@ export function ReceiptPreviewTable({
                   <input
                     type="text"
                     aria-label="Đối tượng"
-                    className="input !py-1 !text-xs w-full"
+                    className="input !py-1 text-base sm:!text-xs w-full"
                     value={r.payee}
                     onChange={e => update(r.id, { payee: e.target.value })}
                     placeholder={r.suggested_category ?? '—'}
@@ -549,7 +549,7 @@ export function ReceiptPreviewTable({
                           <select
                             aria-label={`Tài khoản ${idx + 1}`}
                             className={clsx(
-                              'input !py-1 !text-xs flex-1 min-w-0',
+                              'input !py-1 text-base sm:!text-xs flex-1 min-w-0',
                               !split.account_id && '!border-err-500',
                             )}
                             value={split.account_id}
@@ -568,7 +568,7 @@ export function ReceiptPreviewTable({
                             type="text"
                             inputMode="numeric"
                             aria-label={`Số tiền tài khoản ${idx + 1}`}
-                            className="input !py-1 !text-xs w-20 tabular-nums"
+                            className="input !py-1 text-base sm:!text-xs w-20 tabular-nums"
                             value={formatVNDInput(Math.round(split.amount_minor / 100))}
                             onChange={e =>
                               updateSplit(r.id, idx, {
@@ -613,7 +613,7 @@ export function ReceiptPreviewTable({
                       <select
                         aria-label="Tài khoản"
                         className={clsx(
-                          'input !py-1 !text-xs flex-1 min-w-0',
+                          'input !py-1 text-base sm:!text-xs flex-1 min-w-0',
                           !r.account_id && '!border-err-500',
                         )}
                         value={r.account_id}
@@ -681,7 +681,7 @@ export function ReceiptPreviewTable({
                   <button
                     type="button"
                     className={clsx(
-                      'input !py-1 !text-xs w-full text-left flex items-center gap-2',
+                      'input !py-1 text-base sm:!text-xs w-full text-left flex items-center gap-2',
                       r.split_share ? 'border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-500/10' : '',
                     )}
                     onClick={() => toggleSplitShare(r.id)}
@@ -705,7 +705,7 @@ export function ReceiptPreviewTable({
                       <div className="flex items-center gap-1">
                         <select
                           className={clsx(
-                            'input !py-1 !text-xs flex-1 min-w-0',
+                            'input !py-1 text-base sm:!text-xs flex-1 min-w-0',
                             !r.split_share.person_id && r.split_share.person_name ? '' : '',
                             !r.split_share.person_id && !r.split_share.person_name ? '!border-err-500' : '',
                           )}
@@ -735,7 +735,7 @@ export function ReceiptPreviewTable({
                       {r.split_share.person_id === '__new__' && (
                         <input
                           type="text"
-                          className="input !py-1 !text-xs w-full"
+                          className="input !py-1 text-base sm:!text-xs w-full"
                           placeholder="Tên người mới"
                           value={r.split_share.person_name}
                           onChange={e => updateSplitShare(r.id, { person_name: e.target.value })}
@@ -757,7 +757,7 @@ export function ReceiptPreviewTable({
                         <input
                           type="text"
                           inputMode="numeric"
-                          className="input !py-1 !text-xs w-20 tabular-nums text-right"
+                          className="input !py-1 text-base sm:!text-xs w-20 tabular-nums text-right"
                           value={formatVNDInput(Math.round(r.split_share.amount_minor / 100))}
                           onChange={e => updateSplitShare(r.id, {
                             amount_minor: Math.max(0, parseVNDInput(e.target.value)),
@@ -892,7 +892,7 @@ function BillInlinePicker({ bill, onChange }: BillInlinePickerProps) {
           {safeBill.marketplace === 'other' && (
             <input
               type="text"
-              className="input !py-1 !text-xs w-full"
+              className="input !py-1 text-base sm:!text-xs w-full"
               placeholder="Tên sàn khác (VD: Tiki, Sendo...)"
               value={safeBill.marketplace_other ?? ''}
               onChange={e => onChange({ marketplace_other: e.target.value })}
@@ -911,7 +911,7 @@ function BillInlinePicker({ bill, onChange }: BillInlinePickerProps) {
           </div>
           <input
             type="text"
-            className="input !py-1 !text-xs w-full"
+            className="input !py-1 text-base sm:!text-xs w-full"
             placeholder="VD: Co.opmart, Bách hoá XANH..."
             value={safeBill.store_name ?? ''}
             onChange={e => onChange({ store_name: e.target.value })}

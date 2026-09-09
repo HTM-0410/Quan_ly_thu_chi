@@ -10,16 +10,27 @@
   color-scheme: dark;
 }
 
+html {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: none;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
 html,
 body,
 #root {
   height: 100%;
-}
-
-body {
-  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
 
 ::selection {
@@ -75,6 +86,28 @@ svg *:focus,
 svg *:focus-visible {
   outline: none !important;
   box-shadow: none !important;
+}
+
+/**
+ * Ngăn chặn iOS Safari tự động phóng to (auto-zoom) khi focus vào ô nhập liệu:
+ * Trên iOS Safari, bất kỳ input/select/textarea nào có font-size < 16px sẽ kích hoạt tính năng
+ * tự động zoom toàn bộ viewport, làm xô lệch giao diện và cho phép kéo ngang (horizontal scroll).
+ * Quy tắc dưới đây áp dụng font-size tối thiểu 16px trên màn hình mobile (<= 768px),
+ * sử dụng độ ưu tiên cao để ghi đè mọi class utility như text-xs, text-sm, !text-xs,...
+ */
+@media screen and (max-width: 768px) {
+  html body input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  html body select,
+  html body textarea,
+  html body .input {
+    font-size: 16px !important;
+  }
+}
+
+/* Các vùng cuộn ngang chủ động (tabs, bảng số liệu) vẫn cho phép vuốt ngang mượt mà */
+.no-scrollbar,
+[class*='overflow-x-auto'] {
+  touch-action: pan-x pan-y;
 }
 
 @layer components {

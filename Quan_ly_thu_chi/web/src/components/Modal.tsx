@@ -118,7 +118,7 @@ export function Modal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-3.5 sm:p-4 bg-ink-900/50 backdrop-blur-sm dark:bg-black/70 animate-in fade-in-0 duration-200"
+      className="fixed inset-0 z-[60] flex items-center justify-center p-3.5 sm:p-4 bg-ink-900/50 backdrop-blur-sm dark:bg-black/70 animate-in fade-in-0 duration-200 overflow-x-hidden touch-pan-y"
       onClick={handleAttemptClose}
     >
       <div
@@ -129,7 +129,7 @@ export function Modal({
         aria-describedby={description ? descId : undefined}
         className={clsx(
           'flex w-full max-h-[88vh] sm:max-h-[90vh] flex-col overflow-hidden rounded-card border border-ink-200 bg-surface-raised shadow-pop',
-          'dark:border-ink-800 dark:bg-surface-dark-raised animate-in zoom-in-95 duration-200',
+          'dark:border-ink-800 dark:bg-surface-dark-raised animate-in zoom-in-95 duration-200 overscroll-contain touch-pan-y',
           width,
         )}
         onClick={e => e.stopPropagation()}
@@ -155,7 +155,7 @@ export function Modal({
             <X size={16} strokeWidth={2} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-5">{children}</div>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 sm:px-5 py-4 sm:py-5 touch-pan-y">{children}</div>
         {(footer || primaryLabel || secondaryLabel) && (
           <div className="flex flex-wrap justify-end gap-2 border-t border-ink-100 bg-surface-sunken px-5 py-3.5 dark:border-ink-800 dark:bg-surface-dark-sunken">
             {footer}
