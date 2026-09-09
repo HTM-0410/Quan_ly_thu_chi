@@ -43,19 +43,19 @@ function intensityTone(amount: number, max: number): CellTone {
 }
 
 const RED_TONE_CLASS: Record<CellTone, string> = {
-  0: 'bg-ink-50 text-ink-500 dark:bg-inkDark-100 dark:text-inkDark-500',
-  1: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300',
-  2: 'bg-red-100 text-red-800 dark:bg-red-900/55 dark:text-red-200',
-  3: 'bg-red-500 text-white dark:bg-red-700 dark:text-red-50',
-  4: 'bg-red-700 text-white dark:bg-red-800 dark:text-red-50',
+  0: 'bg-surface-sunken/40 text-ink-500 border-ink-100/60 dark:bg-surface-dark-sunken/40 dark:text-inkDark-500 dark:border-inkDark-200/50',
+  1: 'bg-rose-50/70 text-rose-900 border-rose-200/60 dark:bg-rose-950/25 dark:text-rose-300 dark:border-rose-900/30',
+  2: 'bg-rose-100/75 text-rose-900 border-rose-300/60 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800/40',
+  3: 'bg-rose-200/80 text-rose-950 border-rose-400/70 dark:bg-rose-800/45 dark:text-rose-200 dark:border-rose-700/50',
+  4: 'bg-rose-300/60 text-rose-950 border-2 border-rose-500/80 shadow-2xs dark:bg-rose-800/75 dark:text-rose-100 dark:border-2 dark:border-rose-500/80',
 };
 
 const GREEN_TONE_CLASS: Record<CellTone, string> = {
-  0: 'bg-ink-50 text-ink-500 dark:bg-inkDark-100 dark:text-inkDark-500',
-  1: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
-  2: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/55 dark:text-emerald-200',
-  3: 'bg-emerald-500 text-white dark:bg-emerald-700 dark:text-emerald-50',
-  4: 'bg-emerald-700 text-white dark:bg-emerald-800 dark:text-emerald-50',
+  0: 'bg-surface-sunken/40 text-ink-500 border-ink-100/60 dark:bg-surface-dark-sunken/40 dark:text-inkDark-500 dark:border-inkDark-200/50',
+  1: 'bg-emerald-50/70 text-emerald-900 border-emerald-200/60 dark:bg-emerald-950/25 dark:text-emerald-300 dark:border-emerald-900/30',
+  2: 'bg-emerald-100/75 text-emerald-900 border-emerald-300/60 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-800/40',
+  3: 'bg-emerald-200/80 text-emerald-950 border-emerald-400/70 dark:bg-emerald-800/45 dark:text-emerald-200 dark:border-emerald-700/50',
+  4: 'bg-emerald-300/60 text-emerald-950 border-2 border-emerald-500/80 shadow-2xs dark:bg-emerald-800/75 dark:text-emerald-100 dark:border-2 dark:border-emerald-500/80',
 };
 
 function formatMonthLabel(year: number, monthIndex: number): string {
@@ -151,40 +151,48 @@ export function MonthHeatmap({
       {/* Stat cards */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card-flat px-3 py-2.5">
-          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ok-600 dark:text-ok-500">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-400">
             Tổng thu nhập
           </div>
-          <div className="num mt-0.5 text-lg tabular-nums text-ok-700 dark:text-ok-500">
-            {formatVND(totalIncome)}
+          <div className="num mt-0.5 text-lg tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
+            +{formatVND(totalIncome)}
           </div>
         </div>
         <div className="card-flat px-3 py-2.5">
-          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-err-600 dark:text-err-500">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-err-600 dark:text-err-400">
             Tổng chi tiêu
           </div>
-          <div className="num mt-0.5 text-lg tabular-nums text-err-600 dark:text-err-500">
-            {formatVND(totalExpense)}
+          <div className="num mt-0.5 text-lg tabular-nums font-bold text-err-600 dark:text-err-400">
+            −{formatVND(totalExpense)}
           </div>
         </div>
         <div className="card-flat px-3 py-2.5">
-          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-500">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-400">
             Ròng tháng
           </div>
           <div
-            className={`num mt-0.5 text-lg tabular-nums ${netMonth >= 0 ? 'text-ok-700 dark:text-ok-500' : 'text-err-600 dark:text-err-500'}`}
+            className={`num mt-0.5 text-lg tabular-nums font-bold ${netMonth >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-err-600 dark:text-err-400'}`}
           >
             {netMonth >= 0 ? '+' : '−'}
             {formatVND(Math.abs(netMonth))}
           </div>
-          <div className="mt-0.5 text-2xs text-ink-500 dark:text-inkDark-500">
-            {netMonth >= 0 ? 'Dương' : 'Âm'}
+          <div className="mt-1 flex items-center">
+            {netMonth >= 0 ? (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/50">
+                Thặng dư
+              </span>
+            ) : (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-semibold bg-rose-50 text-rose-700 border border-rose-200/70 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/50">
+                Thâm hụt
+              </span>
+            )}
           </div>
         </div>
         <div className="card-flat px-3 py-2.5">
-          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-500">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-400">
             Ngày chi cao nhất
           </div>
-          <div className="num mt-0.5 text-lg tabular-nums text-ink-900 dark:text-inkDark-900">
+          <div className="num mt-0.5 text-lg tabular-nums font-bold text-ink-900 dark:text-inkDark-900">
             {stats.max_day ? formatVND(stats.max_day.amount_minor) : '—'}
           </div>
           {stats.max_day && (
@@ -247,21 +255,21 @@ export function MonthHeatmap({
                   year: 'numeric',
                 }).format(new Date(hovered.date))}
               </div>
-              <div className="text-xs text-ink-500 dark:text-inkDark-500">
+              <div className="text-xs text-ink-500 dark:text-inkDark-400">
                 {hovered.count} giao dịch ·{' '}
-                <span className="text-err-600 dark:text-err-500">−{formatVND(hovered.amount_minor)}</span>
+                <span className="text-err-600 dark:text-err-400">−{formatVND(hovered.amount_minor)}</span>
                 {hovered.income_minor > 0 && (
                   <>
                     {' / '}
-                    <span className="text-ok-700 dark:text-ok-500">+{formatVND(hovered.income_minor)}</span>
+                    <span className="text-emerald-700 dark:text-emerald-400">+{formatVND(hovered.income_minor)}</span>
                   </>
                 )}
                 {' · ròng: '}
                 <span
                   className={
                     hovered.income_minor - hovered.amount_minor >= 0
-                      ? 'text-ok-700 dark:text-ok-500'
-                      : 'text-err-600 dark:text-err-500'
+                      ? 'text-emerald-700 dark:text-emerald-400 font-medium'
+                      : 'text-err-600 dark:text-err-400 font-medium'
                   }
                 >
                   {hovered.income_minor - hovered.amount_minor >= 0 ? '+' : '−'}
@@ -270,7 +278,7 @@ export function MonthHeatmap({
               </div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-ink-500 dark:text-inkDark-500">
+              <div className="text-xs text-ink-500 dark:text-inkDark-400">
                 {max > 0
                   ? `${Math.round((Math.abs(hovered.amount_minor - hovered.income_minor) / max) * 100)}% so với ngày mạnh nhất`
                   : '—'}
@@ -278,31 +286,31 @@ export function MonthHeatmap({
             </div>
           </div>
         ) : (
-          <div className="text-ink-500 dark:text-inkDark-500">
+          <div className="text-ink-500 dark:text-inkDark-400">
             Di chuột qua một ngày để xem chi tiết.
           </div>
         )}
       </div>
 
       {/* Legend gradient */}
-      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-inkDark-500">
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500" />
+      <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500 dark:text-inkDark-400">
+        <span className="inline-flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
+          <span className="inline-block h-2.5 w-2.5 rounded-xs bg-emerald-400 dark:bg-emerald-500" />
           Dương
         </span>
         <div className="flex h-3 overflow-hidden rounded border border-ink-200 dark:border-inkDark-200">
-          <div className="w-5 bg-emerald-700 dark:bg-emerald-800" />
-          <div className="w-5 bg-emerald-500 dark:bg-emerald-700" />
-          <div className="w-5 bg-emerald-100 dark:bg-emerald-900/55" />
-          <div className="w-5 bg-emerald-50 dark:bg-emerald-950/40" />
-          <div className="w-5 bg-ink-50 dark:bg-inkDark-100" />
-          <div className="w-5 bg-red-50 dark:bg-red-950/40" />
-          <div className="w-5 bg-red-100 dark:bg-red-900/55" />
-          <div className="w-5 bg-red-500 dark:bg-red-700" />
-          <div className="w-5 bg-red-700 dark:bg-red-800" />
+          <div className="w-5 bg-emerald-300/70 dark:bg-emerald-800/75" />
+          <div className="w-5 bg-emerald-200/80 dark:bg-emerald-800/45" />
+          <div className="w-5 bg-emerald-100/75 dark:bg-emerald-900/30" />
+          <div className="w-5 bg-emerald-50/70 dark:bg-emerald-950/25" />
+          <div className="w-5 bg-surface-sunken dark:bg-surface-dark-sunken" />
+          <div className="w-5 bg-rose-50/70 dark:bg-rose-950/25" />
+          <div className="w-5 bg-rose-100/75 dark:bg-rose-900/30" />
+          <div className="w-5 bg-rose-200/80 dark:bg-rose-800/45" />
+          <div className="w-5 bg-rose-300/70 dark:bg-rose-800/75" />
         </div>
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500" />
+        <span className="inline-flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400">
+          <span className="inline-block h-2.5 w-2.5 rounded-xs bg-rose-400 dark:bg-rose-500" />
           Âm
         </span>
         <span className="ml-3 text-ink-400 dark:text-inkDark-400">
@@ -313,7 +321,7 @@ export function MonthHeatmap({
       {/* Top 5 ngày chi nhiều */}
       {topDays.length > 0 && (
         <div>
-          <h4 className="mb-2 text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-500">
+          <h4 className="mb-2 text-2xs font-semibold uppercase tracking-[0.14em] text-ink-500 dark:text-inkDark-400">
             Top 5 ngày chi nhiều nhất
           </h4>
           <ol className="space-y-1">
@@ -323,21 +331,21 @@ export function MonthHeatmap({
                 className="flex items-center justify-between rounded-card border border-ink-100 bg-surface-raised px-3 py-1.5 text-sm dark:border-inkDark-200 dark:bg-surface-dark-raised"
               >
                 <span className="flex items-center gap-2">
-                  <span className="grid h-5 w-5 place-items-center rounded-full bg-red-100 text-2xs font-semibold text-red-700 dark:bg-red-700/30 dark:text-red-500">
+                  <span className="grid h-5 w-5 place-items-center rounded-full bg-rose-50 text-2xs font-semibold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
                     {i + 1}
                   </span>
-                  <span className="text-ink-900 dark:text-inkDark-900">
+                  <span className="text-ink-900 dark:text-inkDark-900 font-medium">
                     {new Intl.DateTimeFormat('vi-VN', {
                       weekday: 'short',
                       day: '2-digit',
                       month: '2-digit',
                     }).format(new Date(d.date))}
                   </span>
-                  <span className="text-xs text-ink-500 dark:text-inkDark-500">
+                  <span className="text-xs text-ink-500 dark:text-inkDark-400">
                     ({d.count} giao dịch)
                   </span>
                 </span>
-                <span className="num tabular-nums text-err-600 dark:text-err-500">
+                <span className="num tabular-nums font-semibold text-err-600 dark:text-err-400">
                   {formatVND(d.amount_minor)}
                 </span>
               </li>
@@ -390,6 +398,15 @@ function CellView({
       : hasIncome
         ? `Ngày ${cell.day}, thu nhập ${formatVND(cell.income_minor)}. Nhấn Enter để xem chi tiết.`
         : `Ngày ${cell.day}, không có giao dịch`;
+  const dayTextCls = deficit < 0
+    ? 'text-emerald-950 dark:text-emerald-100'
+    : deficit > 0
+      ? 'text-rose-950 dark:text-rose-100'
+      : 'text-ink-600 dark:text-inkDark-500';
+
+  const incomeTextCls = 'text-emerald-700 dark:text-emerald-300 font-bold';
+  const expenseTextCls = 'text-rose-700 dark:text-rose-300 font-semibold';
+
   return (
     <button
       type="button"
@@ -402,17 +419,27 @@ function CellView({
       onBlur={() => onHover(null)}
       onClick={onActivate}
       disabled={!hasExpense && !hasIncome}
-      className={`group relative aspect-square rounded border border-ink-200 px-1 py-0.5 text-left text-[10px] transition focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-inkDark-200 ${hasExpense || hasIncome ? 'cursor-pointer hover:scale-[1.04] hover:shadow-sm' : 'cursor-default'} ${toneCls} ${ringClass} ${opacityClass}`}
+      className={`group relative aspect-square rounded-lg border p-1 text-left flex flex-col justify-between transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-400 ${
+        hasExpense || hasIncome
+          ? 'cursor-pointer hover:scale-[1.04] hover:shadow-sm'
+          : 'cursor-default'
+      } ${toneCls} ${ringClass} ${opacityClass}`}
     >
-      <div className="font-semibold leading-none">{cell.day}</div>
+      <div className="flex items-start justify-between w-full leading-none gap-0.5">
+        <span className={`text-[11px] font-bold ${dayTextCls}`}>
+          {cell.day}
+        </span>
+        {hasIncome && (
+          <span className={`text-[9px] tabular-nums leading-tight ${incomeTextCls}`}>
+            +{compactVNDMinor(cell.income_minor)}
+          </span>
+        )}
+      </div>
       {hasExpense && (
-        <div className="absolute bottom-0.5 right-1 text-[9px] font-medium leading-none tabular-nums">
-          −{compactVNDMinor(cell.amount_minor)}
-        </div>
-      )}
-      {hasIncome && (
-        <div className="absolute top-0.5 left-1 text-[9px] font-medium leading-none tabular-nums text-ok-700 dark:text-ok-400">
-          +{compactVNDMinor(cell.income_minor)}
+        <div className="flex justify-end w-full leading-none mt-auto">
+          <span className={`text-[9px] tabular-nums leading-tight ${expenseTextCls}`}>
+            −{compactVNDMinor(cell.amount_minor)}
+          </span>
         </div>
       )}
     </button>

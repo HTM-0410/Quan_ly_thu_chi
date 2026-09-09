@@ -40,3 +40,11 @@ supabase/.temp/
 # Test/coverage
 coverage/
 .nyc_output/
+
+# Cloudflare Wrangler
+.wrangler/
+**/.wrangler/
+
+# Scratch files
+**/scratch/
+supabase-stale-migrations-*/

@@ -95,6 +95,31 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      create_ocr_transaction_row_atomic: RpcScalar<
+        {
+          p_row_id: string;
+          p_splits: import('./ocrAtomic').OcrAtomicSplit[];
+          p_bill?: import('./ocrAtomic').OcrAtomicBill | null;
+          p_debt?: import('./ocrAtomic').OcrAtomicDebt | null;
+        },
+        import('./ocrAtomic').OcrAtomicRowResult
+      >;
+      create_paying_for_operation: RpcScalar<
+        {
+          p_operation_id: string;
+          p_account_id: string;
+          p_expense_amount_minor: number;
+          p_payment_amount_minor: number;
+          p_debt_id: string;
+          p_occurred_at?: string;
+          p_category_id?: string | null;
+          p_global_category_id?: string | null;
+          p_expense_payee?: string | null;
+          p_expense_note?: string | null;
+          p_payment_note?: string | null;
+        },
+        import('./financialOperations').PayingForOperationResult
+      >;
       create_manual_transaction: RpcScalar<
         {
           p_client_generated_id: string;
@@ -104,8 +129,10 @@ export interface Database {
           p_currency?: string;
           p_occurred_at: string;
           p_category_id?: string | null;
+          p_global_category_id?: string | null;
           p_payee?: string | null;
           p_note?: string | null;
+          p_source?: 'manual' | 'bank' | 'csv' | 'recurring';
         },
         string
       >;
@@ -128,11 +155,46 @@ export interface Database {
       get_account_balance: RpcScalar<{ p_account_id: string }, number>;
       get_net_worth: RpcScalar<Record<string, never>, number>;
       get_transactions_summary: RpcSetof<
-        { p_start_date: string; p_end_date: string; p_category_id?: string | null },
+        {
+          p_start_date: string;
+          p_end_date: string;
+          p_category_id?: string | null;
+          p_global_category_id?: string | null;
+          p_timezone?: string;
+        },
         {
           total_income: number;
           total_expense: number;
           net_change: number;
+          transaction_count: number;
+        }
+      >;
+      list_accounts_with_balances: RpcSetof<
+        { p_user_id: string; p_include_archived?: boolean },
+        FinancialAccount & { balance_minor: number }
+      >;
+      get_monthly_history: RpcSetof<
+        { p_user_id: string; p_months?: number; p_timezone?: string },
+        {
+          period_start: string;
+          period_end: string;
+          total_income: number;
+          total_expense: number;
+          net_change: number;
+          transaction_count: number;
+        }
+      >;
+      get_category_expenses_breakdown: RpcSetof<
+        {
+          p_start_date: string;
+          p_end_date: string;
+          p_timezone?: string;
+        },
+        {
+          category_id: string;
+          category_name: string;
+          color: string;
+          total_amount: number;
           transaction_count: number;
         }
       >;
@@ -159,9 +221,47 @@ export interface Database {
           percent: number;
         }
       >;
+      create_budget_with_categories: RpcScalar<
+        {
+          p_name: string;
+          p_amount_minor: number;
+          p_cadence: 'weekly' | 'monthly' | 'custom';
+          p_start_date: string;
+          p_end_date?: string | null;
+          p_category_ids?: string[] | null;
+        },
+        Budget
+      >;
+      update_budget: RpcScalar<
+        {
+          p_budget_id: string;
+          p_name: string;
+          p_amount_minor: number;
+          p_cadence: 'weekly' | 'monthly' | 'custom';
+          p_start_date: string;
+          p_end_date?: string | null;
+          p_category_ids?: string[] | null;
+        },
+        Budget
+      >;
+      toggle_budget_active: RpcScalar<
+        { p_budget_id: string; p_is_active: boolean },
+        Budget
+      >;
+      delete_budget: RpcScalar<{ p_budget_id: string }, boolean>;
       materialize_recurring_rules: RpcScalar<
         { p_up_to?: string; p_max_rules?: number },
         number
+      >;
+      set_recurring_status: RpcScalar<
+        { p_rule_id: string; p_status: 'active' | 'paused' | 'ended' },
+        boolean
+      >;
+      confirm_recurring_transaction: RpcScalar<{ p_transaction_id: string }, boolean>;
+      skip_recurring_transaction: RpcScalar<{ p_transaction_id: string }, boolean>;
+      create_ocr_transaction_row: RpcScalar<
+        { p_row_id: string; p_splits: Array<Record<string, unknown>> },
+        string[]
       >;
       update_transaction: RpcScalar<
         {
@@ -214,6 +314,24 @@ export interface Database {
         DebtPayment
       >;
       mark_debt_paid: RpcScalar<{ p_id: string }, void>;
+      settle_debt_payment: RpcScalar<
+        {
+          p_debt_id: string;
+          p_account_id: string;
+          p_amount_minor: number;
+          p_payment_date?: string | null;
+          p_note?: string | null;
+          p_idempotency_key?: string | null;
+        },
+        {
+          success: boolean;
+          payment_id: string;
+          transaction_id: string;
+          remaining_amount: number;
+          status: 'active' | 'paid';
+          idempotent?: boolean;
+        }
+      >;
       get_debt_summary: RpcSetof<Record<string, never>, { metric: string; amount: number; count: number }>;
       // Bills
       get_bill_with_items: RpcScalar<{ p_transaction_id: string }, { bill: Bill; items: BillItem[] } | null>;

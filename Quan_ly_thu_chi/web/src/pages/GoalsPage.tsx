@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Pause, Pencil, Play, Plus, RefreshCcw, Target as TargetIcon, Wallet } from 'lucide-react';
+import {
+  ArrowDownRight,
+  History,
+  Info,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCcw,
+  Target as TargetIcon,
+  Wallet,
+} from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { FormField } from '../components/FormField';
 import { EmptyState, ErrorState, Skeleton } from '../components/EmptyState';
@@ -13,13 +24,14 @@ import {
   addGoalContribution,
   createGoal,
   listAccounts,
+  listGoalContributions,
   listGoals,
   updateGoal,
 } from '../lib/api';
 import { formatDate, formatVND } from '../lib/format';
 import { GOAL_STATUS_LABEL } from '../lib/labels';
 import clsx from 'clsx';
-import type { FinancialAccount, SavingGoal } from '../lib/types';
+import type { FinancialAccount, GoalContribution, SavingGoal } from '../lib/types';
 
 const COLORS = [
   '#b8451f', '#1e88e5', '#15803d', '#7c3aed',
@@ -66,7 +78,11 @@ export function GoalsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<{ name?: string; target?: string; date?: string }>({});
   const [form, setForm] = useState<Form>(EMPTY);
-  const [contribFor, setContribFor] = useState<SavingGoal | null>(null);
+  const [contribModal, setContribModal] = useState<{
+    goal: SavingGoal;
+    mode: 'deposit' | 'withdraw';
+  } | null>(null);
+  const [historyFor, setHistoryFor] = useState<SavingGoal | null>(null);
 
   async function load() {
     setLoading(true);
@@ -168,7 +184,7 @@ export function GoalsPage() {
             Mục tiêu tiết kiệm
           </h1>
           <p className="mt-1 text-sm text-ink-500 dark:text-inkDark-500">
-            Đặt mục tiêu và theo dõi tiến độ tích lũy.
+            Đặt mục tiêu và theo dõi tiến độ tích lũy. Số tiền phân bổ theo dõi sổ sách, không chuyển tiền thực tế khỏi ví hay sinh chi phí tiêu dùng.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -186,6 +202,13 @@ export function GoalsPage() {
           </button>
         </div>
       </header>
+
+      <div className="flex items-start gap-2.5 rounded-lg border border-brand-200/70 bg-brand-50/60 p-3 text-xs text-brand-900 dark:border-brand-500/20 dark:bg-brand-500/10 dark:text-brand-300">
+        <Info size={16} className="mt-0.5 shrink-0 text-brand-600 dark:text-brand-400" />
+        <div>
+          <strong>Ý nghĩa tài chính:</strong> Mục tiêu là khoản phân bổ theo dõi sổ sách trên lộ trình tài chính của bạn, không tự động trừ tiền trong tài khoản ngân hàng và không tính vào chi phí tiêu dùng tháng (theo Quyết định D05).
+        </div>
+      </div>
 
       {err && <ErrorState message={err} onRetry={load} />}
 
@@ -217,6 +240,7 @@ export function GoalsPage() {
                   : g.status === 'abandoned'
                     ? 'bg-ink-50 text-ink-500 dark:bg-ink-800 dark:text-inkDark-500'
                     : 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300';
+            const linkedAcc = accounts.find(a => a.id === g.linked_account_id);
             return (
               <div key={g.id} className="card space-y-4 p-5 transition hover:shadow-pop">
                 <div className="flex items-start gap-3">
@@ -233,6 +257,11 @@ export function GoalsPage() {
                       Bắt đầu {formatDate(g.start_date)}
                       {g.target_date ? ` · Đến ${formatDate(g.target_date)}` : ''}
                     </div>
+                    {linkedAcc && (
+                      <div className="mt-0.5 text-2xs text-ink-500 dark:text-inkDark-400">
+                        Ví theo dõi: <span className="font-medium text-ink-700 dark:text-inkDark-300">{linkedAcc.name}</span>
+                      </div>
+                    )}
                   </div>
                   <span className={clsx('chip', statusChip)}>
                     {GOAL_STATUS_LABEL[g.status]}
@@ -260,33 +289,57 @@ export function GoalsPage() {
                     {pct}% hoàn thành
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
-                    className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5"
-                    onClick={() => setContribFor(g)}
+                    className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5 !px-3"
+                    onClick={() => setContribModal({ goal: g, mode: 'deposit' })}
+                    aria-label={`Thêm tiền vào ${g.name}`}
                   >
-                    <Wallet size={13} strokeWidth={1.75} /> Đóng góp
+                    <Plus size={14} strokeWidth={2} /> Thêm tiền
                   </button>
                   <button
-                    className="btn-secondary inline-flex items-center gap-1.5 !px-3"
-                    onClick={() => openEdit(g)}
+                    className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5 !px-3 text-amber-700 dark:text-amber-400"
+                    onClick={() => setContribModal({ goal: g, mode: 'withdraw' })}
+                    disabled={g.current_amount_minor <= 0}
+                    aria-label={`Rút tiền khỏi ${g.name}`}
+                    title={g.current_amount_minor <= 0 ? 'Mục tiêu chưa có số dư' : 'Rút tiền'}
                   >
-                    <Pencil size={13} strokeWidth={1.75} /> Sửa
+                    <ArrowDownRight size={14} strokeWidth={2} /> Rút tiền
+                  </button>
+                  <button
+                    className="btn-ghost inline-flex items-center justify-center !p-2"
+                    onClick={() => setHistoryFor(g)}
+                    aria-label={`Lịch sử ${g.name}`}
+                    title="Lịch sử tích lũy"
+                  >
+                    <History size={14} strokeWidth={1.75} />
+                  </button>
+                  <button
+                    className="btn-ghost inline-flex items-center justify-center !p-2"
+                    onClick={() => openEdit(g)}
+                    aria-label={`Sửa ${g.name}`}
+                    title="Sửa"
+                  >
+                    <Pencil size={14} strokeWidth={1.75} />
                   </button>
                   {g.status === 'active' && (
                     <button
-                      className="btn-secondary inline-flex items-center gap-1.5 !px-3"
+                      className="btn-ghost inline-flex items-center justify-center !p-2"
                       onClick={() => setStatus(g, 'paused')}
+                      aria-label={`Tạm dừng ${g.name}`}
+                      title="Tạm dừng"
                     >
-                      <Pause size={13} strokeWidth={1.75} /> Tạm dừng
+                      <Pause size={14} strokeWidth={1.75} />
                     </button>
                   )}
                   {g.status === 'paused' && (
                     <button
-                      className="btn-primary inline-flex items-center gap-1.5 !px-3"
+                      className="btn-ghost inline-flex items-center justify-center !p-2 text-brand-600 dark:text-brand-400"
                       onClick={() => setStatus(g, 'active')}
+                      aria-label={`Tiếp tục ${g.name}`}
+                      title="Tiếp tục"
                     >
-                      <Play size={13} strokeWidth={1.75} /> Tiếp tục
+                      <Play size={14} strokeWidth={1.75} />
                     </button>
                   )}
                 </div>
@@ -410,12 +463,18 @@ export function GoalsPage() {
       </Modal>
 
       <ContributionModal
-        goal={contribFor}
-        onClose={() => setContribFor(null)}
+        goal={contribModal?.goal ?? null}
+        mode={contribModal?.mode ?? 'deposit'}
+        onClose={() => setContribModal(null)}
         onDone={() => {
-          setContribFor(null);
+          setContribModal(null);
           load();
         }}
+      />
+
+      <GoalHistoryModal
+        goal={historyFor}
+        onClose={() => setHistoryFor(null)}
       />
     </div>
   );
@@ -423,10 +482,12 @@ export function GoalsPage() {
 
 function ContributionModal({
   goal,
+  mode,
   onClose,
   onDone,
 }: {
   goal: SavingGoal | null;
+  mode: 'deposit' | 'withdraw';
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -438,20 +499,33 @@ function ContributionModal({
 
   if (!goal) return null;
   const goalId = goal.id;
+  const currentAmount = goal.current_amount_minor;
+  const isWithdraw = mode === 'withdraw';
 
   async function submit() {
-    if (amount === 0) {
-      setAmountError('Vui lòng nhập số tiền.');
+    if (amount <= 0) {
+      setAmountError('Vui lòng nhập số tiền lớn hơn 0.');
+      return;
+    }
+    if (isWithdraw && amount > currentAmount) {
+      setAmountError(
+        `Số tiền rút không được vượt quá số dư hiện có (${formatVND(currentAmount)}).`,
+      );
       return;
     }
     setSubmitting(true);
     try {
       await addGoalContribution({
         goal_id: goalId,
-        amount_minor: amount,
-        note: note.trim() || null,
+        amount_minor: isWithdraw ? -amount : amount,
+        note: note.trim() || (isWithdraw ? 'Rút tiền mục tiêu' : 'Đóng góp mục tiêu'),
       });
-      toast.push('success', 'Đã ghi nhận đóng góp');
+      toast.push(
+        'success',
+        isWithdraw
+          ? `Đã rút ${formatVND(amount)} khỏi mục tiêu`
+          : `Đã thêm ${formatVND(amount)} vào mục tiêu`,
+      );
       onDone();
     } catch (e) {
       toast.push('error', e instanceof Error ? e.message : String(e));
@@ -464,7 +538,12 @@ function ContributionModal({
     <Modal
       open
       onClose={() => (submitting ? null : onClose())}
-      title={`Đóng góp cho "${goal.name}"`}
+      title={isWithdraw ? `Rút tiền khỏi "${goal.name}"` : `Thêm tiền vào "${goal.name}"`}
+      description={
+        isWithdraw
+          ? 'Giảm số tiền tích lũy của mục tiêu này.'
+          : 'Ghi nhận thêm số tiền đã tích lũy cho mục tiêu này.'
+      }
       size="sm"
       footer={
         <>
@@ -472,12 +551,16 @@ function ContributionModal({
             Hủy
           </button>
           <button
-            className="btn-primary inline-flex items-center gap-2"
+            className={clsx(
+              'btn-primary inline-flex items-center gap-2',
+              isWithdraw &&
+                '!bg-amber-600 hover:!bg-amber-700 dark:!bg-amber-600 dark:hover:!bg-amber-700',
+            )}
             onClick={submit}
             disabled={submitting}
           >
             {submitting && <Spinner size="sm" />}
-            {submitting ? 'Đang lưu…' : 'Đóng góp'}
+            {submitting ? 'Đang lưu…' : isWithdraw ? 'Xác nhận rút tiền' : 'Xác nhận thêm tiền'}
           </button>
         </>
       }
@@ -485,32 +568,160 @@ function ContributionModal({
       <div className="space-y-4">
         <div className="rounded-card border border-ink-100 bg-surface-sunken p-3 text-sm dark:border-ink-800 dark:bg-surface-dark-sunken">
           <div className="flex items-baseline justify-between">
-            <span className="text-ink-500 dark:text-inkDark-500">Hiện tại</span>
-            <span className="num tabular-nums text-ink-900 dark:text-inkDark-900">
+            <span className="text-ink-500 dark:text-inkDark-500">Số dư hiện tại</span>
+            <span className="num tabular-nums font-semibold text-ink-900 dark:text-inkDark-900">
               {formatVND(goal.current_amount_minor)}
             </span>
           </div>
           <div className="mt-1 flex items-baseline justify-between">
-            <span className="text-ink-500 dark:text-inkDark-500">Mục tiêu</span>
+            <span className="text-ink-500 dark:text-inkDark-500">Mục tiêu cần đạt</span>
             <span className="num tabular-nums text-ink-700 dark:text-inkDark-500">
               {formatVND(goal.target_amount_minor)}
             </span>
           </div>
         </div>
-        <FormField label="Số tiền (VND, dương = thêm, âm = rút)" required error={amountError}>
+
+        <FormField
+          label={isWithdraw ? 'Số tiền rút (VND)' : 'Số tiền thêm (VND)'}
+          required
+          error={amountError}
+        >
           <VNDInput
             value={amount}
             onChange={n => {
               setAmount(n);
               if (amountError) setAmountError(null);
             }}
-            placeholder="VD: 1.000.000"
+            placeholder="VD: 500.000"
             autoFocus
           />
         </FormField>
+
+        {isWithdraw && goal.current_amount_minor > 0 && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+              onClick={() => {
+                setAmount(goal.current_amount_minor);
+                if (amountError) setAmountError(null);
+              }}
+            >
+              Rút toàn bộ ({formatVND(goal.current_amount_minor)})
+            </button>
+          </div>
+        )}
+
         <FormField label="Ghi chú">
-          <input className="input" value={note} onChange={e => setNote(e.target.value)} />
+          <input
+            className="input"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder={isWithdraw ? 'Lý do rút tiền…' : 'Nguồn tiết kiệm, thưởng…'}
+          />
         </FormField>
+
+        <p className="text-2xs text-ink-400 dark:text-inkDark-500">
+          * Thao tác chỉ cập nhật số liệu theo dõi trên sổ sách, không trừ tiền thực tế trong tài khoản ngân hàng/ví.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
+function GoalHistoryModal({
+  goal,
+  onClose,
+}: {
+  goal: SavingGoal | null;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState<GoalContribution[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!goal) return;
+    setLoading(true);
+    setErr(null);
+    listGoalContributions(goal.id)
+      .then(res => {
+        setHistory(res);
+      })
+      .catch(e => {
+        setErr(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [goal]);
+
+  if (!goal) return null;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Lịch sử tích lũy: "${goal.name}"`}
+      description={`Theo dõi các lần thêm và rút tiền (${formatVND(goal.current_amount_minor)} / ${formatVND(goal.target_amount_minor)})`}
+      size="md"
+      footer={
+        <button className="btn-secondary" onClick={onClose}>
+          Đóng
+        </button>
+      }
+    >
+      <div className="space-y-3">
+        {loading ? (
+          <Skeleton className="h-32" />
+        ) : err ? (
+          <div className="text-sm text-err-600 dark:text-err-400">{err}</div>
+        ) : history.length === 0 ? (
+          <EmptyState
+            title="Chưa có lịch sử tích lũy"
+            description="Mục tiêu này chưa phát sinh giao dịch thêm hoặc rút tiền nào."
+            icon={<History size={20} strokeWidth={1.5} />}
+          />
+        ) : (
+          <div className="max-h-[380px] divide-y divide-ink-100 overflow-y-auto pr-1 dark:divide-ink-800">
+            {history.map(item => {
+              const isDeposit = item.amount_minor > 0;
+              return (
+                <div key={item.id} className="flex items-center justify-between py-2.5 text-sm">
+                  <div className="min-w-0 pr-3">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={clsx(
+                          'inline-block h-2 w-2 rounded-full',
+                          isDeposit ? 'bg-ok-500' : 'bg-amber-500',
+                        )}
+                      />
+                      <span className="font-medium text-ink-900 dark:text-inkDark-900">
+                        {isDeposit ? 'Thêm tiền' : 'Rút tiền'}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-ink-500 dark:text-inkDark-500">
+                      {formatDate(item.occurred_at)}
+                      {item.note ? ` · ${item.note}` : ''}
+                    </div>
+                  </div>
+                  <div
+                    className={clsx(
+                      'num whitespace-nowrap text-right font-semibold tabular-nums',
+                      isDeposit
+                        ? 'text-ok-600 dark:text-ok-400'
+                        : 'text-amber-600 dark:text-amber-400',
+                    )}
+                  >
+                    {isDeposit
+                      ? `+${formatVND(item.amount_minor)}`
+                      : `-${formatVND(Math.abs(item.amount_minor))}`}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </Modal>
   );

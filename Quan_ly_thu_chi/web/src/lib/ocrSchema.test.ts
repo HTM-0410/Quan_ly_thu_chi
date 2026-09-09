@@ -5,6 +5,8 @@ import {
   validateOcrResult,
   normalizeOcrOccurredAt,
   OcrParseError,
+  GEMINI_RESPONSE_SCHEMA,
+  MAX_OCR_AMOUNT_MINOR,
 } from './ocrSchema';
 
 const VALID_TRANSACTION = {
@@ -90,6 +92,14 @@ describe('OcrResultSchema', () => {
   it('rejects more than 50 transactions', () => {
     const txs = Array.from({ length: 51 }, () => VALID_TRANSACTION);
     expect(() => OcrResultSchema.parse({ transactions: txs })).toThrow();
+  });
+});
+
+describe('GEMINI_RESPONSE_SCHEMA', () => {
+  it('bounds amount output to prevent pathological digit repetition', () => {
+    const amountSchema = GEMINI_RESPONSE_SCHEMA.properties.transactions.items.properties.amount_minor;
+    expect(amountSchema.minimum).toBe(1);
+    expect(amountSchema.maximum).toBe(MAX_OCR_AMOUNT_MINOR);
   });
 });
 

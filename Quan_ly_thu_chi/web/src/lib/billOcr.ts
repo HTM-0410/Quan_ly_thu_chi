@@ -5,16 +5,17 @@
 // =============================================================
 
 import {
-  GEMINI_API_KEY,
-  OCR_MODEL,
-  IS_PROD,
   MissingOcrConfigError,
 } from './config';
+import { supabase } from './supabase';
 import {
   BILL_GEMINI_RESPONSE_SCHEMA,
   validateBillParseResult,
   BillOcrParseError,
   type BillParseResult,
+  sanityCheckBillItem,
+  sanityCheckBillTotal,
+  type BillItemSanity,
 } from './billOcrSchema';
 
 export { BillOcrParseError } from './billOcrSchema';
@@ -24,15 +25,13 @@ export {
   type BillItemSanity,
 } from './billOcrSchema';
 
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
-
-/** HTTP error do Gemini trả — UI có thể dùng status để retry/backoff. */
+/** HTTP error do OCR proxy trả — UI có thể dùng status để retry/backoff. */
 export class BillOcrHttpError extends Error {
   constructor(
     public readonly status: number,
     public readonly bodyText: string,
   ) {
-    super(`Gemini API ${status}: ${truncate(bodyText, 200)}`);
+    super(`OCR proxy ${status}: ${truncate(bodyText, 200)}`);
     this.name = 'BillOcrHttpError';
   }
 }
@@ -41,50 +40,67 @@ async function callGeminiWithRetry(args: {
   url: string;
   body: unknown;
   maxRetries: number;
+  signal?: AbortSignal;
 }): Promise<unknown> {
   let lastErr: unknown = null;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    throw new MissingOcrConfigError('Bạn cần đăng nhập trước khi dùng OCR.');
+  }
 
   for (let attempt = 0; attempt <= args.maxRetries; attempt++) {
+    if (args.signal?.aborted) {
+      throw new DOMException('Thao tác OCR bill đã bị huỷ.', 'AbortError');
+    }
+
     let res: Response;
+    const t0 = Date.now();
     try {
+      // eslint-disable-next-line no-console
+      console.log(`[bill-ocr] Gửi request tới ${args.url} (lần ${attempt + 1}/${args.maxRetries + 1})...`);
       res = await fetch(args.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify(args.body),
+        signal: args.signal,
       });
-    } catch (networkErr) {
+      // eslint-disable-next-line no-console
+      console.log(`[bill-ocr] Phản hồi từ ${args.url}: status ${res.status} sau ${Date.now() - t0}ms`);
+    } catch (networkErr: any) {
+      if (networkErr?.name === 'AbortError' || args.signal?.aborted) {
+        throw networkErr;
+      }
       lastErr = networkErr;
-      if (attempt < args.maxRetries) {
+      // eslint-disable-next-line no-console
+      console.warn(`[bill-ocr] Lỗi kết nối tới ${args.url}:`, networkErr);
+      if (attempt < args.maxRetries && !args.signal?.aborted) {
         await sleep(500 * 2 ** attempt);
         continue;
       }
       throw new BillOcrParseError(
-        'Không kết nối được Gemini (mất mạng hoặc bị chặn CORS). Thử lại sau.',
+        'Không kết nối được OCR proxy. Thử lại sau.',
         networkErr,
       );
     }
 
     if (res.ok) {
-      if (!IS_PROD) {
-        // eslint-disable-next-line no-console
-        console.log(`[billOcr] ✅ Gemini OK (model=${OCR_MODEL}, attempt=${attempt + 1})`);
-      }
       return await res.json();
     }
 
     const text = await safeText(res);
-
-    if (!IS_PROD) {
-      // eslint-disable-next-line no-console
-      console.error(`[billOcr] ❌ Gemini HTTP ${res.status}: ${truncate(text, 500)}`);
-    }
+    // eslint-disable-next-line no-console
+    console.warn(`[bill-ocr] Proxy trả status ${res.status}:`, text.slice(0, 200));
 
     if (res.status === 429 || res.status >= 500) {
       lastErr = new BillOcrHttpError(res.status, text);
       const retryAfterHeader = res.headers.get('Retry-After');
       const retryAfter = retryAfterHeader ? Number(retryAfterHeader) * 1000 : null;
       const wait = retryAfter ?? 1000 * 2 ** attempt;
-      if (attempt < args.maxRetries) {
+      if (attempt < args.maxRetries && !args.signal?.aborted) {
         await sleep(Math.min(wait, 10_000));
         continue;
       }
@@ -98,11 +114,12 @@ async function callGeminiWithRetry(args: {
 }
 
 /**
- * Nén ảnh xuống tối đa `maxDim` ở chiều dài nhất, encode base64 + giữ MIME gốc.
+ * Nén ảnh xuống tối đa `maxDim` ở chiều dài nhất, encode base64 JPEG 0.82.
+ * Luôn phủ nền trắng để tránh PNG trong suốt bị đen, tối ưu kích thước và tốc độ AI.
  */
 async function fileToCompressedBase64(
   file: File,
-  maxDim = 1600,
+  maxDim = 1400,
 ): Promise<{ base64: string; mime: string }> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -115,8 +132,8 @@ async function fileToCompressedBase64(
   if (!/^image\/(jpeg|png|webp|gif)$/i.test(mime)) {
     throw new BillOcrParseError(`Định dạng ảnh không hỗ trợ: ${mime}. Dùng JPEG/PNG/WebP.`);
   }
-  if (file.size > 8 * 1024 * 1024) {
-    throw new BillOcrParseError('Ảnh quá lớn (>8MB). Vui lòng nén hoặc chọn ảnh khác.');
+  if (file.size > 15 * 1024 * 1024) {
+    throw new BillOcrParseError('Ảnh quá lớn (>15MB). Vui lòng nén hoặc chọn ảnh khác.');
   }
 
   const img = await loadImage(dataUrl);
@@ -132,9 +149,14 @@ async function fileToCompressedBase64(
   if (!ctx) {
     return { base64, mime };
   }
+
+  // Phủ nền trắng
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
-  const outMime = mime === 'image/png' ? 'image/png' : 'image/jpeg';
-  const outDataUrl = canvas.toDataURL(outMime, outMime === 'image/jpeg' ? 0.85 : undefined);
+
+  const outMime = 'image/jpeg';
+  const outDataUrl = canvas.toDataURL(outMime, 0.82);
   const split = splitDataUrl(outDataUrl);
   return { base64: split.base64, mime: outMime };
 }
@@ -166,11 +188,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
+export type BillOcrProgressStage = 'compressing' | 'uploading' | 'analyzing';
+
 export interface ParseBillOptions {
-  /** Override model (mặc định = OCR_MODEL từ config). */
+  /** Giữ tương thích API; model thực tế do Worker allowlist quyết định. */
   model?: string;
-  /** Số retry tối đa khi 429/5xx. Mặc định 3. */
+  /** Số retry tối đa khi 429/5xx. Mặc định 2. */
   maxRetries?: number;
+  /** Signal cho phép huỷ request ngay lập tức khi user bấm Huỷ */
+  signal?: AbortSignal;
+  /** Callback thông báo tiến độ từng giai đoạn */
+  onProgress?: (stage: BillOcrProgressStage) => void;
 }
 
 const BILL_SYSTEM_PROMPT = `Bạn là trợ lý trích xuất danh sách sản phẩm từ ảnh bill siêu thị / hoá đơn mua sắm Việt Nam.
@@ -209,9 +237,9 @@ Nước ngọt Pepsi    x 3   45.000
 Tổng cộng:                  140.000₫
 ---
 → {"items":[
-  {"name":"Sữa tươi 1L","quantity":2,"unit_price":35000,"line_total":70000,"note":null},
-  {"name":"Bánh mì sandwich","quantity":1,"unit_price":25000,"line_total":25000,"note":null},
-  {"name":"Nước ngọt Pepsi","quantity":3,"unit_price":15000,"line_total":45000,"note":null}
+  {"name":"Sữa tươi 1L","quantity":2,"unit_price":3500000,"line_total":7000000,"note":null},
+  {"name":"Bánh mì sandwich","quantity":1,"unit_price":2500000,"line_total":2500000,"note":null},
+  {"name":"Nước ngọt Pepsi","quantity":3,"unit_price":1500000,"line_total":4500000,"note":null}
 ],"total":14000000,"store_name":"Co.opmart","purchased_at":"2026-08-02 14:30","image_quality":"good","notes":null}
 
 Ảnh bill Shopee online (không có tên cửa hàng offline):
@@ -223,25 +251,27 @@ Phí vận chuyển: 25.000₫
 Tổng thanh toán: 615.000₫
 ---
 → {"items":[
-  {"name":"Sạc dự phòng 20000mAh","quantity":1,"unit_price":350000,"line_total":350000,"note":null},
-  {"name":"Ốp iPhone 15 Pro","quantity":2,"unit_price":60000,"line_total":120000,"note":null},
-  {"name":"Phí vận chuyển","quantity":1,"unit_price":25000,"line_total":25000,"note":"Phí ship"}
+  {"name":"Sạc dự phòng 20000mAh","quantity":1,"unit_price":35000000,"line_total":35000000,"note":null},
+  {"name":"Ốp iPhone 15 Pro","quantity":2,"unit_price":12000000,"line_total":24000000,"note":null},
+  {"name":"Phí vận chuyển","quantity":1,"unit_price":2500000,"line_total":2500000,"note":null}
 ],"total":61500000,"store_name":null,"purchased_at":null,"image_quality":"good","notes":null}
-
-Nếu ảnh không phải bill (ảnh chụp người, cảnh vật, ...) → {"items":[],"total":null,"store_name":null,"purchased_at":null,"image_quality":"good","notes":"Không phát hiện sản phẩm trong ảnh"}`;
+`;
 
 /**
- * Parse 1 ảnh bill → trả về BillParseResult đã validate.
- * Throw MissingOcrConfigError khi thiếu API key.
+ * Parse 1 ảnh bill siêu thị → trả về BillParseResult đã validate.
+ * Gemini được gọi qua /api/bill-ocr và session được gửi bằng Bearer JWT.
  */
 export async function parseBillFromImage(
   file: File,
   opts: ParseBillOptions = {},
 ): Promise<BillParseResult> {
-  if (!GEMINI_API_KEY) throw new MissingOcrConfigError();
-
+  opts.onProgress?.('compressing');
+  const t0 = Date.now();
   const { base64, mime } = await fileToCompressedBase64(file);
-  const model = opts.model ?? OCR_MODEL;
+  // eslint-disable-next-line no-console
+  console.log(
+    `[bill-ocr] Nén bill "${file.name}" xong: ${(file.size / 1024).toFixed(0)}KB -> ${(base64.length / 1024).toFixed(0)}KB base64 trong ${Date.now() - t0}ms`,
+  );
 
   const requestBody = {
     contents: [
@@ -259,22 +289,17 @@ export async function parseBillFromImage(
     },
   };
 
-  const url = `${GEMINI_ENDPOINT}/${model}:generateContent?key=${GEMINI_API_KEY}`;
+  opts.onProgress?.('uploading');
   const json = await callGeminiWithRetry({
-    url,
+    url: '/api/bill-ocr',
     body: requestBody,
-    maxRetries: opts.maxRetries ?? 3,
+    maxRetries: opts.maxRetries ?? 2,
+    signal: opts.signal,
   });
 
+  opts.onProgress?.('analyzing');
   const parsed = unwrapGeminiJson(json);
   const validated = validateBillParseResult(parsed);
-
-  if (!IS_PROD) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[billOcr] 📦 parsed ${validated.items.length} items, total=${validated.total}`,
-    );
-  }
 
   return validated;
 }

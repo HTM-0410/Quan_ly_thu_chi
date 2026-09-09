@@ -1,0 +1,194 @@
+
+> quan-ly-thu-chi-web@1.0.0 test
+> vitest run --reporter=dot
+
+
+ RUN  v2.1.9 D:/Quản lý thu chi/Quan_ly_thu_chi/web
+
+ ✓ src/lib/daily.test.ts (20 tests) 28ms
+ ✓ src/pages/GoalsPage.test.tsx (6 tests) 456ms
+ ✓ src/pages/BudgetsPage.test.tsx (6 tests) 366ms
+ ✓ src/lib/worker.test.ts (9 tests) 27ms
+stderr | src/components/PaymentModal.test.tsx > PaymentModal > Render: hiển thị tổng nợ, còn nợ, mode toggle
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+
+stderr | src/components/PaymentModal.test.tsx > PaymentModal > Default mode = partial, amount input enabled
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+
+stderr | src/components/PaymentModal.test.tsx > PaymentModal > Click "Trả hết" auto-fill amount = remaining (formatted), disable input
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+
+stderr | src/components/PaymentModal.test.tsx > PaymentModal > Đóng modal qua nút Đóng → reset state khi mở lại
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+Warning: An update to PaymentModal inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PaymentModal (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\PaymentModal.tsx:19:25)
+    at ToastProvider (D:\Quản lý thu chi\Quan_ly_thu_chi\web\src\components\Toast.tsx:8:26)
+
+ ✓ src/components/PaymentModal.test.tsx (9 tests) 292ms
+ ✓ src/pages/ReportsPage.test.tsx (5 tests) 345ms
+stdout | src/components/ocr/ReceiptImportModal.test.tsx > ReceiptImportModal atomic OCR path > keeps the row editable when the atomic operation fails, including bill/debt work
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T10:00:00Z',
+  parsedUTC: '2026-09-08T10:00:00.000Z',
+  offsetMin: -420,
+  output: '2026-09-08T17:00'
+}
+
+stdout | src/components/ocr/ReceiptImportModal.test.tsx > ReceiptImportModal atomic OCR path > retries the same stable row payload and removes the row only after the atomic result succeeds
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T10:00:00Z',
+  parsedUTC: '2026-09-08T10:00:00.000Z',
+  offsetMin: -420,
+  output: '2026-09-08T17:00'
+}
+
+ ✓ src/components/ocr/ReceiptImportModal.test.tsx (2 tests) 273ms
+ ✓ src/pages/RecurringPage.test.tsx (4 tests) 287ms
+ ✓ src/lib/billOcr.test.ts (16 tests) 27ms
+stderr | src/pages/DashboardPage.test.tsx > DashboardPage (F21, F27, F19: Chênh Lệch Thu Chi, Actionable Insights, 6 mục mới nhất) > renders "Chênh lệch thu–chi" label on monthly expense card (F21)
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ ✓ src/pages/DashboardPage.test.tsx (4 tests) 172ms
+ ✓ src/lib/ocrSchema.test.ts (20 tests) 15ms
+ ✓ src/pages/AccountsPage.test.tsx (4 tests) 257ms
+ ✓ src/lib/recurringSchedule.test.ts (14 tests) 6ms
+ ✓ src/lib/exportCsv.test.ts (8 tests) 25ms
+ ✓ src/lib/ocrAtomic.test.ts (5 tests) 64ms
+ ✓ src/lib/transactionsPagination.test.ts (4 tests) 3ms
+ ✓ src/lib/financialOperations.test.ts (5 tests) 59ms
+stdout | src/pages/TransactionsPage.test.tsx > ManualTransactionModal operation identity > passes one stable client_generated_id across an unknown-result resubmit
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T04:13:46.842Z',
+  parsedUTC: '2026-09-08T04:13:46.842Z',
+  offsetMin: -420,
+  output: '2026-09-08T11:13'
+}
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T04:13:46.896Z',
+  parsedUTC: '2026-09-08T04:13:46.896Z',
+  offsetMin: -420,
+  output: '2026-09-08T11:13'
+}
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T04:13:46.956Z',
+  parsedUTC: '2026-09-08T04:13:46.956Z',
+  offsetMin: -420,
+  output: '2026-09-08T11:13'
+}
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T04:13:46.966Z',
+  parsedUTC: '2026-09-08T04:13:46.966Z',
+  offsetMin: -420,
+  output: '2026-09-08T11:13'
+}
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T04:13:46.982Z',
+  parsedUTC: '2026-09-08T04:13:46.982Z',
+  offsetMin: -420,
+  output: '2026-09-08T11:13'
+}
+[fmt] toLocalDateTimeInput {
+  input: '2026-09-08T04:13:46.985Z',
+  parsedUTC: '2026-09-08T04:13:46.985Z',
+  offsetMin: -420,
+  output: '2026-09-08T11:13'
+}
+
+ ✓ src/pages/TransactionsPage.test.tsx (1 test) 157ms
+ ✓ src/lib/format.test.ts (10 tests) 19ms
+
+ Test Files  19 passed (19)
+      Tests  152 passed (152)
+   Start at  11:13:20
+   Duration  26.90s (transform 1.33s, setup 2.08s, collect 4.43s, tests 2.88s, environment 11.96s, prepare 1.83s)
+

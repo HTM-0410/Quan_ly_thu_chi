@@ -1,10 +1,12 @@
 import { supabase } from './supabase';
 import { GLOBAL_CATEGORY_PREFIX } from './domain';
+import { calculateInitialNextOccurrence } from './recurringSchedule';
 import type {
   FinancialAccount,
   Category,
   Transaction,
   SavingGoal,
+  GoalContribution,
   Budget,
   RecurringRule,
   Profile,
@@ -52,7 +54,7 @@ export async function listAccounts(): Promise<FinancialAccount[]> {
  * 1 round-trip: trả về account + balance_minor.
  * Thay thế N+1 (listAccounts rồi Promise.all(getAccountBalance)).
  */
-export async function listAccountsWithBalances(): Promise<
+export async function listAccountsWithBalances(includeArchived = false): Promise<
   (FinancialAccount & { balance: number })[]
 > {
   const { data: session } = await supabase.auth.getSession();
@@ -60,6 +62,7 @@ export async function listAccountsWithBalances(): Promise<
   if (!userId) throw new Error('Not authenticated');
   const { data, error } = await supabase.rpc('list_accounts_with_balances' as never, {
     p_user_id: userId,
+    p_include_archived: includeArchived,
   } as never);
   if (error) throw error;
   const rows = (data ?? []) as Array<{
@@ -125,6 +128,14 @@ export async function archiveAccount(id: string) {
   const { error } = await supabase
     .from('financial_accounts')
     .update({ is_archived: true })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function unarchiveAccount(id: string) {
+  const { error } = await supabase
+    .from('financial_accounts')
+    .update({ is_archived: false })
     .eq('id', id);
   if (error) throw error;
 }
@@ -325,57 +336,164 @@ export function pickCategoryFields(id: string | null | undefined): {
 // ============================================================
 // Transactions
 // ============================================================
-export async function listTransactions(opts?: {
+export interface ListTransactionsOptions {
   limit?: number;
+  page?: number;
+  pageSize?: number;
   from?: string;
   to?: string;
   accountId?: string;
-  type?: Transaction['type'];
+  type?: Transaction['type'] | 'all';
   categoryId?: string;
-}): Promise<Transaction[]> {
-  // Query 1: lấy transactions bình thường (không nested select — PostgREST đôi khi
-  // trả 400 với cú pháp `*,relation!inner(...)` và gây lỗi `[object Object]` ở UI).
-  let q = supabase
-    .from('transactions')
-    .select('*')
-    .eq('status', 'posted')
-    .order('occurred_at', { ascending: false })
-    .limit(opts?.limit ?? 100);
-  if (opts?.from) q = q.gte('occurred_at', opts.from);
-  if (opts?.to) q = q.lt('occurred_at', opts.to);
-  if (opts?.type) q = q.eq('type', opts.type);
-  if (opts?.categoryId) q = q.eq('category_id', opts.categoryId);
-  const { data, error } = await q;
-  if (error) throw error;
+  status?: 'posted' | 'voided' | 'all';
+  search?: string;
+  minAmount?: number;
+  maxAmount?: number;
+}
 
-  const rows = (data as Transaction[]) ?? [];
-  const ids = rows.map(r => r.id);
-  if (ids.length === 0) return rows;
+export interface PaginatedTransactionsResult {
+  items: Transaction[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
 
-  // Query 2: lấy (transaction_id, account_id) từ transaction_entries cho các tx trên.
-  // Dùng `in.(...)` thay vì nested select. Với transfer có 2 entries: lấy entry đầu tiên
-  // cho hiển thị (UI dùng `acc` cho tên account, fallback "—" nếu null).
-  let entriesQ = supabase
-    .from('transaction_entries')
-    .select('transaction_id, account_id')
-    .in('transaction_id', ids);
-  if (opts?.accountId) entriesQ = entriesQ.eq('account_id', opts.accountId as string);
-  const { data: entriesData, error: entriesError } = await entriesQ;
-  if (entriesError) throw entriesError;
+export async function listTransactionsPaginated(
+  opts?: ListTransactionsOptions,
+): Promise<PaginatedTransactionsResult> {
+  const pageSize = opts?.pageSize ?? opts?.limit ?? 50;
+  const page = Math.max(1, opts?.page ?? 1);
+  const fromIdx = (page - 1) * pageSize;
+  const toIdx = fromIdx + pageSize - 1;
 
-  // Lấy account_id đầu tiên cho mỗi transaction_id.
-  const accountByTxId = new Map<string, string>();
-  for (const e of (entriesData ?? []) as Array<{ transaction_id: string; account_id: string }>) {
-    if (!accountByTxId.has(e.transaction_id)) {
-      accountByTxId.set(e.transaction_id, e.account_id);
+  // Nếu có accountId, lọc transaction_id qua transaction_entries trước
+  let accountTxIds: string[] | null = null;
+  if (opts?.accountId) {
+    const { data: entryRows, error: entryErr } = await supabase
+      .from('transaction_entries')
+      .select('transaction_id')
+      .eq('account_id', opts.accountId);
+    if (entryErr) throw entryErr;
+    const rows = (entryRows ?? []) as Array<{ transaction_id: string }>;
+    accountTxIds = Array.from(new Set(rows.map(r => r.transaction_id)));
+    if (accountTxIds.length === 0) {
+      return { items: [], totalCount: 0, page, pageSize, totalPages: 0 };
     }
   }
 
-  // Nếu có accountId filter mà không tìm thấy entries nào khớp, trả về rỗng.
-  if (opts?.accountId && accountByTxId.size === 0) return [];
+  let q = supabase
+    .from('transactions')
+    .select('*', { count: 'exact' });
 
-  const result = rows.map(r => ({ ...r, account_id: accountByTxId.get(r.id) ?? null }));
-  return result;
+  if (accountTxIds) {
+    q = q.in('id', accountTxIds);
+  }
+
+  // Filter status: mặc định 'posted'
+  const status = opts?.status ?? 'posted';
+  if (status !== 'all') {
+    q = q.eq('status', status);
+  }
+
+  // Filter type
+  if (opts?.type && opts.type !== 'all') {
+    q = q.eq('type', opts.type);
+  }
+
+  // Filter category (hỗ trợ cả custom và global)
+  if (opts?.categoryId) {
+    if (opts.categoryId.startsWith('global:')) {
+      q = q.eq('global_category_id', opts.categoryId.replace('global:', ''));
+    } else {
+      q = q.eq('category_id', opts.categoryId);
+    }
+  }
+
+  // Filter date
+  if (opts?.from) q = q.gte('occurred_at', opts.from);
+  if (opts?.to) q = q.lte('occurred_at', opts.to);
+
+  // Filter amount
+  if (opts?.minAmount != null) q = q.gte('amount_minor', opts.minAmount);
+  if (opts?.maxAmount != null) q = q.lte('amount_minor', opts.maxAmount);
+
+  // Search keyword trong payee hoặc note
+  if (opts?.search && opts.search.trim()) {
+    const term = opts.search.trim().replace(/[%,()]/g, '');
+    if (term) {
+      q = q.or(`payee.ilike.%${term}%,note.ilike.%${term}%`);
+    }
+  }
+
+  // Order ổn định (occurred_at desc, id desc) và phân trang
+  q = q
+    .order('occurred_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(fromIdx, toIdx);
+
+  const { data, count, error } = await q;
+  if (error) throw error;
+
+  const rows = (data as Transaction[]) ?? [];
+  const totalCount = count ?? rows.length;
+  const totalPages = Math.ceil(totalCount / pageSize);
+
+  if (rows.length === 0) {
+    return { items: [], totalCount, page, pageSize, totalPages };
+  }
+
+  // Lấy entries cho các giao dịch trong trang hiện tại để map tài khoản (bao gồm transfer 2 phía)
+  const pageIds = rows.map(r => r.id);
+  const { data: entriesData, error: entriesError } = await supabase
+    .from('transaction_entries')
+    .select('transaction_id, account_id, amount_minor')
+    .in('transaction_id', pageIds);
+  if (entriesError) throw entriesError;
+
+  const entriesByTxId = new Map<string, Array<{ account_id: string; amount_minor: number }>>();
+  for (const e of (entriesData ?? []) as Array<{ transaction_id: string; account_id: string; amount_minor: number }>) {
+    const list = entriesByTxId.get(e.transaction_id);
+    if (list) list.push(e);
+    else entriesByTxId.set(e.transaction_id, [e]);
+  }
+
+  const items: Transaction[] = rows.map(r => {
+    const txEntries = entriesByTxId.get(r.id) ?? [];
+    let accountId: string | null = null;
+    let fromAccountId: string | null = null;
+    let toAccountId: string | null = null;
+
+    if (r.type === 'transfer') {
+      const fromEntry = txEntries.find(e => e.amount_minor < 0);
+      const toEntry = txEntries.find(e => e.amount_minor > 0);
+      fromAccountId = fromEntry?.account_id ?? null;
+      toAccountId = toEntry?.account_id ?? null;
+      accountId = fromAccountId ?? toAccountId;
+    } else {
+      accountId = txEntries[0]?.account_id ?? null;
+    }
+
+    return {
+      ...r,
+      account_id: accountId,
+      from_account_id: fromAccountId,
+      to_account_id: toAccountId,
+    };
+  });
+
+  return {
+    items,
+    totalCount,
+    page,
+    pageSize,
+    totalPages,
+  };
+}
+
+export async function listTransactions(opts?: ListTransactionsOptions): Promise<Transaction[]> {
+  const res = await listTransactionsPaginated(opts);
+  return res.items;
 }
 
 export async function createManualTransaction(input: {
@@ -399,14 +517,13 @@ export async function createManualTransaction(input: {
   // Split category_id thành {category_id, global_category_id} theo prefix 'global:'
   const catFields = pickCategoryFields(input.category_id ?? null);
 
-  // Retry tối đa 3 lần với client_generated_id mới nếu RPC trả 409 (idempotency conflict).
-  // Nguyên nhân: RPC có thể trả 409 khi client_generated_id đã tồn tại ở request khác
-  // (vd OCR batch gọi nhiều lần do retry mạng, hoặc user double-click import).
+  // Một nghiệp vụ chỉ có một operation key. Retry/conflict/unknown result phải
+  // dùng lại đúng key để RPC trả kết quả cũ thay vì tạo giao dịch mới.
+  const clientGeneratedId = input.client_generated_id ?? crypto.randomUUID();
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const cid = input.client_generated_id ?? crypto.randomUUID();
     const { data, error } = await supabase.rpc('create_manual_transaction', {
-      p_client_generated_id: cid,
+      p_client_generated_id: clientGeneratedId,
       p_type: input.type,
       p_account_id: input.account_id,
       p_amount_minor: input.amount_minor,
@@ -420,41 +537,17 @@ export async function createManualTransaction(input: {
     });
     if (!error) return data as string;
     lastError = error;
-    // eslint-disable-next-line no-console
-    console.error('[ocr] RPC failed:', {
-      attempt,
-      cid,
-      payload: {
-        type: input.type,
-        account_id: input.account_id,
-        amount_minor: input.amount_minor,
-        occurred_at: input.occurred_at,
-        category_id: input.category_id,
-        catFields,
-        payee: input.payee,
-        note_len: finalNote?.length ?? 0,
-      },
-      error: {
-        message: error.message,
-        code: (error as { code?: string }).code,
-        status: (error as { status?: number }).status,
-        details: (error as { details?: string }).details,
-        hint: (error as { hint?: string }).hint,
-      },
-    });
-    // Chỉ retry khi 409 conflict (idempotency); các lỗi khác throw ngay.
+    // Chỉ retry lỗi transient/conflict; validation và payload mismatch fail fast.
     const status =
       (error as { status?: number; code?: string }).status ??
       (error as { statusCode?: number }).statusCode;
     const code = (error as { code?: string }).code;
-    const isConflict = status === 409 || code === '409' || code === 'P0001';
-    if (!isConflict) break;
-    // Force new uuid cho lần retry kế tiếp (tránh tái sử dụng cid bị trùng).
-    input.client_generated_id = undefined;
-    // Small backoff để tránh race với transaction đang insert.
+    const isRetryable =
+      status === 408 || status === 409 || status === 429 || (status != null && status >= 500) || code === '23505';
+    if (!isRetryable || attempt === 2) break;
     await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
   }
-  // Surface error message đầy đủ cho UI (kèm status, code, details).
+  // Surface error message cho UI, không ghi payload tài chính vào console.
   const err = lastError as { message?: string; code?: string; status?: number; details?: string };
   const detail = [err.message, err.code, err.details].filter(Boolean).join(' | ');
   throw new Error(detail || 'RPC create_manual_transaction failed');
@@ -466,6 +559,7 @@ export async function createManualTransaction(input: {
  */
 export async function importOcrTransactions(
   rows: Array<{
+    ocr_row_id?: string;
     account_id: string;
     type: 'income' | 'expense';
     amount_minor: number;
@@ -475,20 +569,45 @@ export async function importOcrTransactions(
     note?: string | null;
   }>,
 ): Promise<Array<{ ok: true; id: string } | { ok: false; error: string; row: number }>> {
-  const results: Array<
-    { ok: true; id: string } | { ok: false; error: string; row: number }
-  > = [];
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i]!;
+  const results: Array<{ ok: true; id: string } | { ok: false; error: string; row: number }> = [];
+  const indexed = rows.map((row, index) => ({ row, index }));
+  const groups = new Map<string, typeof indexed>();
+  for (const item of indexed) {
+    const key = item.row.ocr_row_id ?? `single:${item.index}`;
+    const group = groups.get(key);
+    if (group) group.push(item);
+    else groups.set(key, [item]);
+  }
+
+  for (const group of groups.values()) {
+    const first = group[0]!;
     try {
-      const id = await createManualTransaction({ ...r, fromOcr: true });
-      results.push({ ok: true, id });
+      if (first.row.ocr_row_id) {
+        const payload = group.map(({ row }) => {
+          const category = pickCategoryFields(row.category_id ?? null);
+          return {
+            ...row,
+            ocr_row_id: undefined,
+            category_id: category.category_id,
+            global_category_id: category.global_category_id,
+            note: row.note ? `${row.note} [OCR]` : '[OCR]',
+          };
+        });
+        const { data, error } = await supabase.rpc('create_ocr_transaction_row', {
+          p_row_id: first.row.ocr_row_id,
+          p_splits: payload,
+        } as never);
+        if (error) throw error;
+        const ids = (data ?? []) as string[];
+        if (ids.length !== group.length) throw new Error('OCR row không trả đủ transaction');
+        group.forEach((item, index) => { results[item.index] = { ok: true, id: ids[index]! }; });
+      } else {
+        const id = await createManualTransaction({ ...first.row, fromOcr: true });
+        results[first.index] = { ok: true, id };
+      }
     } catch (e) {
-      results.push({
-        ok: false,
-        error: e instanceof Error ? e.message : String(e),
-        row: i,
-      });
+      const message = e instanceof Error ? e.message : String(e);
+      group.forEach(item => { results[item.index] = { ok: false, error: message, row: item.index }; });
     }
   }
   return results;
@@ -596,14 +715,17 @@ export async function getTransactionsSummary(opts: {
   start_date: string;
   end_date: string;
   category_id?: string;
+  timezone?: string;
 }) {
   const catFields = pickCategoryFields(opts.category_id ?? null);
+  const tz = opts.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Ho_Chi_Minh';
   const { data, error } = await supabase.rpc('get_transactions_summary', {
     p_start_date: opts.start_date,
     p_end_date: opts.end_date,
     p_category_id: catFields.category_id,
     p_global_category_id: catFields.global_category_id,
-  });
+    p_timezone: tz,
+  } as never);
   if (error) throw error;
   return data?.[0] as
     | {
@@ -613,6 +735,85 @@ export async function getTransactionsSummary(opts: {
         transaction_count: number;
       }
     | undefined;
+}
+
+export interface CategoryExpenseItem {
+  category_id: string;
+  category_name: string;
+  color: string;
+  total_amount: number;
+  transaction_count: number;
+}
+
+/**
+ * Tổng hợp toàn bộ chi tiêu theo danh mục (Server-side RPC get_category_expenses_breakdown).
+ * Khắc phục F06: không bị giới hạn 500 dòng, tính đủ Chưa phân loại và Khác.
+ */
+export async function getCategoryExpensesBreakdown(opts: {
+  start_date: string;
+  end_date: string;
+  timezone?: string;
+}): Promise<CategoryExpenseItem[]> {
+  const tz = opts.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Ho_Chi_Minh';
+  try {
+    const { data, error } = await supabase.rpc('get_category_expenses_breakdown', {
+      p_start_date: opts.start_date,
+      p_end_date: opts.end_date,
+      p_timezone: tz,
+    });
+    if (!error && data) {
+      return (data as any[]).map(r => ({
+        category_id: r.category_id,
+        category_name: r.category_name,
+        color: r.color,
+        total_amount: Number(r.total_amount),
+        transaction_count: Number(r.transaction_count),
+      }));
+    }
+  } catch {
+    // Fallback sang query client-side nếu RPC chưa có
+  }
+
+  // Fallback client-side an toàn
+  const { data: txs, error: txErr } = await supabase
+    .from('transactions')
+    .select('*, categories(name, color), global_categories(name, color)')
+    .eq('status', 'posted')
+    .eq('type', 'expense')
+    .gte('occurred_at', `${opts.start_date}T00:00:00`)
+    .lte('occurred_at', `${opts.end_date}T23:59:59`);
+  if (txErr) throw txErr;
+
+  const totals = new Map<string, { name: string; color: string; total_amount: number; count: number }>();
+  for (const t of (txs ?? [])) {
+    if (t.metadata?.is_debt_principal) continue;
+    let key = '__uncategorized__';
+    let name = 'Chưa phân loại';
+    let color = '#757575';
+
+    if (t.category_id) {
+      key = t.category_id;
+      name = (t as any).categories?.name ?? 'Chưa phân loại';
+      color = (t as any).categories?.color ?? '#757575';
+    } else if (t.global_category_id) {
+      key = `global:${t.global_category_id}`;
+      name = (t as any).global_categories?.name ?? 'Chưa phân loại';
+      color = (t as any).global_categories?.color ?? '#757575';
+    }
+
+    const cur = totals.get(key) ?? { name, color, total_amount: 0, count: 0 };
+    cur.total_amount += Number(t.amount_minor);
+    cur.count += 1;
+    totals.set(key, cur);
+  }
+
+  return Array.from(totals.entries()).map(([k, v]) => ({
+    category_id: k,
+    category_name: v.name,
+    color: v.color,
+    total_amount: v.total_amount,
+    transaction_count: v.count,
+  })).sort((a, b) => b.total_amount - a.total_amount);
 }
 
 /**
@@ -709,29 +910,51 @@ export async function addGoalContribution(input: {
   amount_minor: number;
   occurred_at?: string;
   note?: string | null;
+  client_generated_id?: string;
 }) {
   const { data, error } = await supabase.rpc('add_goal_contribution', {
     p_goal_id: input.goal_id,
     p_amount_minor: input.amount_minor,
     p_occurred_at: input.occurred_at ?? new Date().toISOString(),
     p_note: input.note ?? null,
-    p_client_generated_id: crypto.randomUUID(),
+    p_client_generated_id: input.client_generated_id ?? crypto.randomUUID(),
   });
   if (error) throw error;
   return data as string;
 }
 
+export async function listGoalContributions(goalId: string): Promise<GoalContribution[]> {
+  const { data, error } = await supabase
+    .from('goal_contributions')
+    .select('*')
+    .eq('goal_id', goalId)
+    .order('occurred_at', { ascending: false });
+  if (error) throw error;
+  return (data as GoalContribution[]) ?? [];
+}
+
 // ============================================================
 // Budgets
 // ============================================================
-export async function listBudgets(): Promise<Budget[]> {
-  const { data, error } = await supabase
+export async function listBudgets(options?: { includeInactive?: boolean }): Promise<Budget[]> {
+  let query = supabase
     .from('budgets')
-    .select('*')
-    .eq('is_active', true)
+    .select('*, budget_categories(category_id)')
     .order('created_at', { ascending: false });
+
+  if (!options?.includeInactive) {
+    query = query.eq('is_active', true);
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
-  return (data as Budget[]) ?? [];
+
+  return ((data ?? []) as any[]).map(b => ({
+    ...b,
+    category_ids: Array.isArray(b.budget_categories)
+      ? b.budget_categories.map((bc: any) => bc.category_id).filter(Boolean)
+      : [],
+  })) as Budget[];
 }
 
 export async function createBudget(input: {
@@ -740,7 +963,29 @@ export async function createBudget(input: {
   cadence?: Budget['cadence'];
   start_date: string;
   end_date?: string | null;
-}) {
+  category_ids?: string[];
+}): Promise<Budget> {
+  // 1. Thử gọi RPC create_budget_with_categories nguyên tử
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('create_budget_with_categories', {
+      p_name: input.name,
+      p_amount_minor: input.amount_minor,
+      p_cadence: input.cadence ?? 'monthly',
+      p_start_date: input.start_date,
+      p_end_date: input.end_date ?? null,
+      p_category_ids: input.category_ids && input.category_ids.length > 0 ? input.category_ids : null,
+    });
+    if (!rpcErr && rpcData) {
+      return {
+        ...(rpcData as Budget),
+        category_ids: input.category_ids ?? [],
+      };
+    }
+  } catch {
+    // Fallback sang các bảng trực tiếp nếu RPC chưa có
+  }
+
+  // 2. Fallback trực tiếp
   const { data: session } = await supabase.auth.getSession();
   const userId = session.session?.user.id;
   if (!userId) throw new Error('Not authenticated');
@@ -757,7 +1002,125 @@ export async function createBudget(input: {
     .select('*')
     .single();
   if (error) throw error;
+
+  const budget = data as Budget;
+  if (input.category_ids && input.category_ids.length > 0) {
+    const rows = input.category_ids.map(cid => ({
+      budget_id: budget.id,
+      category_id: cid,
+    }));
+    await supabase.from('budget_categories').insert(rows);
+  }
+
+  return {
+    ...budget,
+    category_ids: input.category_ids ?? [],
+  };
+}
+
+export async function updateBudget(
+  id: string,
+  input: {
+    name: string;
+    amount_minor: number;
+    cadence?: Budget['cadence'];
+    start_date: string;
+    end_date?: string | null;
+    category_ids?: string[];
+  },
+): Promise<Budget> {
+  // 1. Thử gọi RPC update_budget nguyên tử
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('update_budget', {
+      p_budget_id: id,
+      p_name: input.name,
+      p_amount_minor: input.amount_minor,
+      p_cadence: input.cadence ?? 'monthly',
+      p_start_date: input.start_date,
+      p_end_date: input.end_date ?? null,
+      p_category_ids: input.category_ids ?? [],
+    });
+    if (!rpcErr && rpcData) {
+      return {
+        ...(rpcData as Budget),
+        category_ids: input.category_ids ?? [],
+      };
+    }
+  } catch {
+    // Fallback sang các bảng trực tiếp
+  }
+
+  // 2. Fallback trực tiếp
+  const { data, error } = await supabase
+    .from('budgets')
+    .update({
+      name: input.name,
+      amount_minor: input.amount_minor,
+      cadence: input.cadence ?? 'monthly',
+      start_date: input.start_date,
+      end_date: input.end_date ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  if (input.category_ids !== undefined) {
+    await supabase.from('budget_categories').delete().eq('budget_id', id);
+    if (input.category_ids.length > 0) {
+      const rows = input.category_ids.map(cid => ({
+        budget_id: id,
+        category_id: cid,
+      }));
+      await supabase.from('budget_categories').insert(rows);
+    }
+  }
+
+  return {
+    ...(data as Budget),
+    category_ids: input.category_ids ?? [],
+  };
+}
+
+export async function toggleBudgetActive(id: string, is_active: boolean): Promise<Budget> {
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('toggle_budget_active', {
+      p_budget_id: id,
+      p_is_active: is_active,
+    });
+    if (!rpcErr && rpcData) {
+      return rpcData as Budget;
+    }
+  } catch {
+    // Fallback trực tiếp
+  }
+
+  const { data, error } = await supabase
+    .from('budgets')
+    .update({ is_active, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
   return data as Budget;
+}
+
+export async function deleteBudget(id: string): Promise<boolean> {
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('delete_budget', {
+      p_budget_id: id,
+    });
+    if (!rpcErr && typeof rpcData === 'boolean') {
+      return rpcData;
+    }
+  } catch {
+    // Fallback trực tiếp
+  }
+
+  const { error } = await supabase.from('budgets').delete().eq('id', id);
+  if (error) throw error;
+  return true;
 }
 
 export async function getBudgetProgress(
@@ -822,7 +1185,11 @@ export async function createRecurring(input: {
       currency: 'VND',
       frequency: input.frequency,
       start_date: input.start_date,
-      next_occurrence: new Date(input.start_date).toISOString(),
+      next_occurrence: calculateInitialNextOccurrence({
+        frequency: input.frequency,
+        start_date: input.start_date,
+        day_of_month: input.day_of_month,
+      }),
       day_of_month: input.day_of_month ?? null,
       category_id: catFields.category_id,
       global_category_id: catFields.global_category_id,
@@ -845,6 +1212,41 @@ export async function updateRecurring(id: string, patch: Partial<RecurringRule>)
       global_category_id: catFields.global_category_id,
     };
   }
+
+  // Status changes use a locked RPC so resuming a paused rule skips missed
+  // occurrences atomically instead of materializing a catch-up batch.
+  if (Object.keys(patch).length === 1 && patch.status) {
+    const { error } = await supabase.rpc('set_recurring_status', {
+      p_rule_id: id,
+      p_status: patch.status,
+    });
+    if (error) throw error;
+    return;
+  }
+
+  // F15: Nếu sửa lịch hoặc resume mà chưa có next_occurrence mới -> tính lại.
+  // Resume phải bỏ qua các kỳ đã lỡ trong thời gian pause, không ghi bù hàng loạt.
+  if (
+    ('start_date' in patch || 'frequency' in patch || 'day_of_month' in patch || patch.status === 'active') &&
+    !patch.next_occurrence
+  ) {
+    const { data: current } = await supabase
+      .from('recurring_rules')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (current) {
+      const merged = { ...current, ...patch };
+      patch.next_occurrence = calculateInitialNextOccurrence({
+        frequency: merged.frequency,
+        start_date: merged.start_date,
+        day_of_month: merged.day_of_month,
+        end_date: merged.end_date,
+      });
+    }
+  }
+
   const { error } = await supabase.from('recurring_rules').update(patch).eq('id', id);
   if (error) throw error;
 }
@@ -855,6 +1257,31 @@ export async function materializeRecurring(upTo?: string) {
   });
   if (error) throw error;
   return Number(data ?? 0);
+}
+
+export async function listPendingRecurringTransactions(): Promise<Transaction[]> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('source', 'recurring')
+    .eq('status', 'pending')
+    .order('occurred_at', { ascending: true });
+  if (error) throw error;
+  return (data as Transaction[]) ?? [];
+}
+
+export async function confirmRecurringTransaction(transactionId: string): Promise<void> {
+  const { error } = await supabase.rpc('confirm_recurring_transaction', {
+    p_transaction_id: transactionId,
+  });
+  if (error) throw error;
+}
+
+export async function skipRecurringTransaction(transactionId: string): Promise<void> {
+  const { error } = await supabase.rpc('skip_recurring_transaction', {
+    p_transaction_id: transactionId,
+  });
+  if (error) throw error;
 }
 
 // ============================================================
@@ -954,6 +1381,7 @@ export async function createDebt(input: {
   type: 'lend' | 'borrow';
   original_amount: number;
   notes?: string | null;
+  disburse_account_id?: string | null;
 }): Promise<Debt> {
   const { data, error } = await supabase.rpc('create_debt', {
     p_person_id: input.person_id,
@@ -962,7 +1390,39 @@ export async function createDebt(input: {
     p_notes: input.notes ?? null,
   });
   if (error) throw error;
-  return data as Debt;
+  const debt = data as Debt;
+
+  // Nếu người dùng chọn giải ngân/nhận tiền ngay từ ví tài khoản
+  if (input.disburse_account_id) {
+    try {
+      const isLend = input.type === 'lend';
+      const txType = isLend ? 'expense' : 'income';
+      const txNote = input.notes ?? (isLend ? `Cho vay: ${debt.counterparty_name}` : `Đi vay: ${debt.counterparty_name}`);
+      const txId = await createManualTransaction({
+        type: txType,
+        account_id: input.disburse_account_id,
+        amount_minor: input.original_amount,
+        occurred_at: new Date().toISOString(),
+        payee: debt.counterparty_name,
+        note: txNote,
+      });
+
+      await supabase
+        .from('transactions')
+        .update({
+          metadata: {
+            debt_id: debt.id,
+            debt_type: debt.type,
+            is_debt_principal: true,
+          },
+        })
+        .eq('id', txId);
+    } catch (txErr) {
+      console.error('[createDebt] Không thể tạo giao dịch giải ngân:', txErr);
+    }
+  }
+
+  return debt;
 }
 
 export async function deleteDebt(id: string): Promise<void> {
@@ -984,6 +1444,53 @@ export async function addDebtPayment(input: {
   });
   if (error) throw error;
   return data as DebtPayment;
+}
+
+export interface SettleDebtPaymentInput {
+  debt_id: string;
+  account_id: string;
+  amount: number; // minor
+  payment_date?: string;
+  note?: string | null;
+  idempotency_key?: string;
+}
+
+export interface SettleDebtPaymentResult {
+  success: boolean;
+  payment_id: string;
+  transaction_id: string;
+  remaining_amount: number;
+  status: 'active' | 'paid';
+  idempotent?: boolean;
+}
+
+/**
+ * Thanh toán nợ nguyên tử (Atomic RPC settle_debt_payment).
+ * Thực hiện row lock, trừ remaining_amount, ghi payment và sinh transaction có is_debt_principal: true.
+ */
+export async function settleDebtPayment(
+  input: SettleDebtPaymentInput,
+): Promise<SettleDebtPaymentResult> {
+  const cid = input.idempotency_key ?? crypto.randomUUID();
+
+  const { data, error } = await supabase.rpc('settle_debt_payment', {
+    p_debt_id: input.debt_id,
+    p_account_id: input.account_id,
+    p_amount_minor: input.amount,
+    p_payment_date: input.payment_date ?? new Date().toISOString(),
+    p_note: input.note ?? null,
+    p_idempotency_key: cid,
+  });
+  // Thiếu atomic RPC là lỗi triển khai, không được downgrade sang nhiều request.
+  if (error) {
+    if ((error as { code?: string }).code === '42883') {
+      throw new Error('Chưa bật nghiệp vụ thanh toán nợ nguyên tử; giao dịch chưa được ghi sổ.');
+    }
+    throw error;
+  }
+
+  if (!data) throw new Error('Thanh toán nợ không trả về kết quả; giao dịch chưa được xác nhận.');
+  return data as SettleDebtPaymentResult;
 }
 
 export async function markDebtPaid(id: string): Promise<void> {

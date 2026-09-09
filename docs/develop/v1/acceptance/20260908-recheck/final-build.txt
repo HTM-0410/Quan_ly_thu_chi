@@ -1,0 +1,19 @@
+
+> quan-ly-thu-chi-web@1.0.0 build
+> tsc --noEmit && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 2718 modules transformed.
+rendering chunks...
+[plugin:vite:reporter] [plugin vite:reporter] 
+(!) D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/lib/api.ts is dynamically imported by D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/bill/BillOcrModal.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/TransactionsPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/TransactionsPage.tsx but also statically imported by D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/DayDetail.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/DebtDetailModal.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/DebtFormModal.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/PaymentModal.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/bill/BillDetailModal.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/bill/BillOcrModal.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/components/ocr/ReceiptImportModal.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/AccountsPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/BudgetsPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/CategoriesPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/DashboardPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/DebtsPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/GoalsPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/PeoplePage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/RecurringPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/ReportsPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/SettingsPage.tsx, D:/Quản lý thu chi/Quan_ly_thu_chi/web/src/pages/TransactionsPage.tsx, dynamic import will not move module into another chunk.
+
+computing gzip size...
+dist/index.html                            3.17 kB │ gzip:   1.30 kB
+dist/assets/index-CbVPFXl4.css            67.95 kB │ gzip:  10.45 kB
+dist/assets/vendor-react-aTHcul4u.js     164.65 kB │ gzip:  53.76 kB │ map:   708.03 kB
+dist/assets/vendor-supabase-DUyt-Z8u.js  215.56 kB │ gzip:  56.67 kB │ map: 1,182.66 kB
+dist/assets/vendor-charts-Cnlmny4l.js    399.41 kB │ gzip: 108.37 kB │ map: 1,746.66 kB
+dist/assets/index-6l0smmgT.js            460.60 kB │ gzip: 116.15 kB │ map: 1,429.77 kB
+✓ built in 9.97s

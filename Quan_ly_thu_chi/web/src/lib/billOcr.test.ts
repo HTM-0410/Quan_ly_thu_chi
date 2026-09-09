@@ -13,32 +13,34 @@ describe('validateBillParseResult', () => {
     const result = validateBillParseResult(billFixture);
     expect(result.items).toHaveLength(3);
     expect(result.items[0]!.name).toBe('Sữa tươi Vinamilk 1L');
-    // fixture giá trị VND (< 100k) → auto ×100 = 3.500.000 minor
+    // Fixture tuân thủ minor unit (VND × 100)
     expect(result.items[0]!.unit_price).toBe(3_500_000);
-    // total 140.000 < 1.000.000 → auto ×100 = 14.000.000 minor
     expect(result.total).toBe(14_000_000);
     expect(result.store_name).toBe('Co.opmart Nguyễn Kiệm');
     expect(result.image_quality).toBe('good');
   });
 
-  it('auto-multiplies by 100 when AI returns VND as-is (1.000–100.000)', () => {
+  it('preserves minor unit values without threshold guessing (F13 / REQ-013 / QA-09)', () => {
     const raw = {
-      items: [{ name: 'Sản phẩm A', quantity: 1, unit_price: 35000, line_total: 35000 }],
-      total: 35000,
+      items: [{ name: 'Kẹo cao su', quantity: 1, unit_price: 50_000, line_total: 50_000 }],
+      total: 50_000,
     };
     const result = validateBillParseResult(raw);
-    expect(result.items[0]!.unit_price).toBe(3_500_000); // ×100
-    expect(result.items[0]!.line_total).toBe(3_500_000);
-    expect(result.total).toBe(3_500_000);
+    // 50.000 minor unit (500 VND) must NOT be auto-multiplied to 5.000.000
+    expect(result.items[0]!.unit_price).toBe(50_000);
+    expect(result.items[0]!.line_total).toBe(50_000);
+    expect(result.total).toBe(50_000);
   });
 
-  it('keeps values >= 100.000 as-is (already ×100)', () => {
+  it('preserves larger minor unit values as-is', () => {
     const raw = {
       items: [{ name: 'Sản phẩm B', quantity: 1, unit_price: 35_000_00, line_total: 35_000_00 }],
       total: 35_000_00,
     };
     const result = validateBillParseResult(raw);
-    expect(result.items[0]!.unit_price).toBe(35_000_00);
+    expect(result.items[0]!.unit_price).toBe(3_500_000);
+    expect(result.items[0]!.line_total).toBe(3_500_000);
+    expect(result.total).toBe(3_500_000);
   });
 
   it('throws BillOcrParseError on missing required fields', () => {

@@ -228,13 +228,13 @@ export function BillDetailModal({
                   : `(khớp giao dịch)`}
               </span>
             </span>
-            <span className="text-base font-semibold tabular-nums text-ink-900 dark:text-inkDark-100">
+            <span className="text-base font-semibold tabular-nums text-ink-900 dark:text-inkDark-900">
               {formatVND(declaredTotal)}
             </span>
           </div>
 
           {/* Actions */}
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-ink-200 pt-3 dark:border-ink-800">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-ink-200 pt-3 dark:border-inkDark-200">
             {onEdit && (
               <button
                 type="button"

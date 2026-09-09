@@ -118,13 +118,14 @@ export function SettingsPage() {
             />
           </FormField>
           <div className="grid grid-cols-2 gap-3">
-            <FormField label="Tiền tệ">
-              <select className="input" value={currency} onChange={e => setCurrency(e.target.value)}>
-                {CURRENCIES.map(c => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
+            <FormField label="Tiền tệ" hint="Phiên bản v1 hiện chỉ hỗ trợ hạch toán VND.">
+              <select
+                className="input cursor-not-allowed bg-ink-50 dark:bg-ink-800/50"
+                value="VND"
+                disabled
+                title="Phiên bản v1 chỉ hỗ trợ VND"
+              >
+                <option value="VND">VND (Việt Nam Đồng)</option>
               </select>
             </FormField>
             <FormField label="Múi giờ">

@@ -60,6 +60,23 @@ body {
   border-radius: 4px;
 }
 
+/* Vô hiệu hóa outline focus trên các phần tử SVG và biểu đồ Recharts khi click/tap */
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-surface,
+.recharts-surface *,
+.recharts-pie,
+.recharts-pie *,
+.recharts-sector,
+.recharts-bar-rectangle,
+svg:focus,
+svg:focus-visible,
+svg *:focus,
+svg *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-btn px-3.5 py-2 text-sm font-medium
@@ -96,11 +113,11 @@ body {
   }
   .card {
     @apply rounded-card bg-surface-raised border border-ink-200 shadow-card
-      dark:bg-surface-dark-raised dark:border-ink-800;
+      dark:bg-surface-dark-raised dark:border-inkDark-200;
   }
   .card-flat {
     @apply rounded-card bg-surface-raised border border-ink-200
-      dark:bg-surface-dark-raised dark:border-ink-800;
+      dark:bg-surface-dark-sunken dark:border-inkDark-200;
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-pill px-2.5 py-0.5 text-xs font-medium;
@@ -110,6 +127,48 @@ body {
   }
   .divider {
     @apply h-px bg-ink-100 dark:bg-ink-800;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  @keyframes popoverEnter {
+    from {
+      opacity: 0;
+      transform: translateY(-5px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes popoverEnterUp {
+    from {
+      opacity: 0;
+      transform: translateY(5px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .animate-popover-down {
+    animation: popoverEnter 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transform-origin: top;
+  }
+
+  .animate-popover-up {
+    animation: popoverEnterUp 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transform-origin: bottom;
   }
 }
 

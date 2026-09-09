@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import {
+  AlertCircle,
   AlertTriangle,
   ArrowLeft,
   Camera,
+  Clock,
   FileSearch,
   Loader2,
+  RefreshCw,
   Save,
+  Sparkles,
 } from 'lucide-react';
 import { Modal } from '../Modal';
 import { Spinner } from '../Spinner';
@@ -27,7 +31,11 @@ import {
   deleteBill,
   getBillWithItems,
 } from '../../lib/api';
-import { parseBillFromImage, BillOcrParseError } from '../../lib/billOcr';
+import {
+  parseBillFromImage,
+  BillOcrParseError,
+  type BillOcrProgressStage,
+} from '../../lib/billOcr';
 import { MissingOcrConfigError } from '../../lib/config';
 import { formatVNDInput, parseVNDInput, formatVND } from '../../lib/format';
 
@@ -58,15 +66,34 @@ export function BillOcrModal({
   onDeleted,
 }: BillOcrModalProps) {
   const toast = useToast();
-  // Luôn bắt đầu ở bước "Chụp ảnh" khi mở modal — dù là tạo mới hay sửa bill.
-  // (Trước đây edit → vào thẳng bước 3 "Xem & sửa", gây khó chịu vì user
-  // luôn muốn cập nhật từ ảnh mới để AI xử lý lại.)
   const [step, setStep] = useState<Step>('upload');
   const [image, setImage] = useState<StagedImage | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [fallbackReason, setFallbackReason] = useState<'missing_key' | 'other' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Tiến trình đọc bill
+  const [stage, setStage] = useState<BillOcrProgressStage>('compressing');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const timerRef = useRef<any>(null);
+
+  const stopProcessing = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  }, []);
+
+  const handleCancelProcessing = useCallback(() => {
+    stopProcessing();
+    setStep('upload');
+  }, [stopProcessing]);
 
   // Form state
   const [items, setItems] = useState<BillItemInput[]>(() =>
@@ -95,15 +122,17 @@ export function BillOcrModal({
   // Reset khi mở/đóng
   useEffect(() => {
     if (!open) {
+      stopProcessing();
       // Cleanup object URL nếu còn
       if (image) URL.revokeObjectURL(image.previewUrl);
-      // Luôn reset về bước "Chụp ảnh" khi đóng — lần mở sau sẽ bắt đầu lại từ đầu.
       setStep('upload');
       setImage(null);
       setParseError(null);
       setFallbackReason(null);
+      setElapsedSeconds(0);
+      setStage('compressing');
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, stopProcessing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Khi chuyển sang preview, tự fill declaredTotal từ sum nếu chưa có
   useEffect(() => {
@@ -115,12 +144,39 @@ export function BillOcrModal({
 
   async function startProcessing() {
     if (!image) return;
+    stopProcessing();
+
+    const ac = new AbortController();
+    abortControllerRef.current = ac;
+    setElapsedSeconds(0);
+    setStage('compressing');
     setStep('processing');
     setParseError(null);
     setFallbackReason(null);
 
+    const timer = setInterval(() => {
+      setElapsedSeconds(s => s + 1);
+    }, 1000);
+    timerRef.current = timer;
+
     try {
-      const result = await parseBillFromImage(image.file);
+      const PARSE_TIMEOUT_MS = 45_000;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('AI mất hơn 45s không phản hồi. Vui lòng thử lại.')),
+          PARSE_TIMEOUT_MS,
+        ),
+      );
+
+      const result = await Promise.race([
+        parseBillFromImage(image.file, {
+          signal: ac.signal,
+          onProgress: st => setStage(st),
+        }),
+        timeoutPromise,
+      ]);
+
+      if (ac.signal.aborted) return;
 
       // Build items từ AI; nếu line_total = 0 thì tính lại = quantity × unit_price
       const newItems: BillItemInput[] = result.items.map(it => ({
@@ -164,21 +220,21 @@ export function BillOcrModal({
       }
 
       setStep('preview');
-    } catch (err) {
+    } catch (err: any) {
+      if (ac.signal.aborted) return;
       const msg = err instanceof Error ? err.message : String(err);
       if (err instanceof MissingOcrConfigError) {
         setFallbackReason('missing_key');
       } else {
         setParseError(msg);
       }
-      if (err instanceof MissingOcrConfigError) {
-        // Ở lại upload step để user thấy fallback
-        setStep('upload');
-      } else {
-        // Lỗi khác → quay lại upload, user có thể nhập tay
-        setStep('upload');
-        toast.push('error', `Lỗi đọc bill: ${msg}`);
-      }
+      // Quay lại upload step để user thấy lỗi và có thể thử lại hoặc nhập tay
+      setStep('upload');
+      toast.push('error', `Lỗi đọc bill: ${msg}`);
+    } finally {
+      clearInterval(timer);
+      timerRef.current = null;
+      abortControllerRef.current = null;
     }
   }
 
@@ -336,7 +392,11 @@ export function BillOcrModal({
         )}
 
         {step === 'processing' && (
-          <ProcessingView image={image} />
+          <ProcessingView
+            image={image}
+            stage={stage}
+            elapsedSeconds={elapsedSeconds}
+          />
         )}
 
         {step === 'preview' && (
@@ -454,10 +514,10 @@ export function BillOcrModal({
           {step === 'processing' && (
             <button
               type="button"
-              className="btn-secondary"
-              onClick={() => setStep('upload')}
+              className="btn-secondary inline-flex items-center gap-1.5"
+              onClick={handleCancelProcessing}
             >
-              Huỷ
+              <ArrowLeft size={14} /> Huỷ & Quay lại
             </button>
           )}
           {step === 'preview' && (
@@ -519,17 +579,63 @@ function Stepper({ step, hasExistingBill }: { step: Step; hasExistingBill: boole
   );
 }
 
-function ProcessingView({ image }: { image: StagedImage | null }) {
+function ProcessingView({
+  image,
+  stage,
+  elapsedSeconds,
+}: {
+  image: StagedImage | null;
+  stage: BillOcrProgressStage;
+  elapsedSeconds: number;
+}) {
+  const stageLabel =
+    stage === 'compressing'
+      ? '1/3 Đang tối ưu hoá & nén ảnh bill…'
+      : stage === 'uploading'
+        ? '2/3 Đang gửi ảnh an toàn tới Google Gemini…'
+        : '3/3 AI đang phân tích từng dòng sản phẩm…';
+
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-ink-700 dark:text-inkDark-700">
-        Đang gửi ảnh tới AI để trích xuất danh sách sản phẩm…
-      </p>
+    <div className="space-y-4">
+      {/* Progress banner */}
+      <div className="rounded-card border border-brand-200 bg-brand-50/70 p-4 dark:border-brand-800/50 dark:bg-brand-900/15">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="grid h-8 w-8 place-items-center rounded-pill bg-brand-600 text-white shadow-sm dark:bg-brand-500 shrink-0">
+              <Loader2 size={18} className="animate-spin" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-ink-900 dark:text-inkDark-900">
+                Đang đọc và phân tích bill bằng AI
+              </h4>
+              <p className="text-xs text-brand-800 dark:text-brand-300 mt-0.5">
+                {stageLabel}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 rounded-pill bg-surface px-2.5 py-1 text-2xs font-medium text-ink-700 shadow-sm dark:bg-surface-dark dark:text-inkDark-600 shrink-0">
+            <Clock size={12} className="animate-pulse text-brand-600 dark:text-brand-400" />
+            <span className="tabular-nums font-semibold">{elapsedSeconds}s</span>
+            <span className="text-ink-400">/ 45s</span>
+          </div>
+        </div>
+
+        {elapsedSeconds >= 10 && (
+          <div className="mt-3 rounded border border-brand-300/60 bg-white/70 px-2.5 py-1.5 text-2xs text-brand-900 dark:border-brand-700/50 dark:bg-black/20 dark:text-brand-200">
+            💡 Hoá đơn dài hoặc máy chủ AI đang xử lý chi tiết từng sản phẩm. Vui lòng đợi trong giây lát…
+          </div>
+        )}
+      </div>
+
       {image && (
-        <div className="relative mx-auto aspect-square w-40 overflow-hidden rounded-card border border-ink-200 bg-surface-sunken dark:border-ink-700">
-          <img src={image.previewUrl} alt="" className="h-full w-full object-cover opacity-40" />
-          <div className="absolute inset-0 grid place-items-center bg-black/30">
-            <Loader2 className="animate-spin text-white" size={20} strokeWidth={2} />
+        <div className="relative mx-auto aspect-square w-44 overflow-hidden rounded-card border border-brand-500/30 bg-surface-sunken dark:border-ink-700 shadow-sm">
+          <img src={image.previewUrl} alt="" className="h-full w-full object-cover opacity-50 scale-95 transition" />
+          <div className="absolute inset-0 grid place-items-center bg-brand-950/20 backdrop-blur-[1px]">
+            <div className="flex flex-col items-center gap-1.5 text-white">
+              <Loader2 className="animate-spin text-white" size={24} strokeWidth={2.5} />
+              <span className="text-2xs font-semibold drop-shadow">Đang trích xuất…</span>
+            </div>
           </div>
         </div>
       )}

@@ -105,3 +105,22 @@ BEGIN
     WHERE id = rec.id;
   END LOOP;
 END $$;
+
+-- Complete debt compatibility columns after the seed migration has run.
+UPDATE public.debts d
+SET counterparty_name = p.name
+FROM public.people p
+WHERE d.person_id = p.id
+  AND d.counterparty_name IS NULL;
+
+ALTER TABLE public.debts
+  ALTER COLUMN counterparty_name SET NOT NULL;
+
+UPDATE public.debt_payments dp
+SET user_id = d.user_id
+FROM public.debts d
+WHERE dp.debt_id = d.id
+  AND dp.user_id IS NULL;
+
+ALTER TABLE public.debt_payments
+  ALTER COLUMN user_id SET NOT NULL;

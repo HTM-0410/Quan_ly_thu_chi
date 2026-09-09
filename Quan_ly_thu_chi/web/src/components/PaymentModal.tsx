@@ -1,15 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal } from './Modal';
 import { FormField } from './FormField';
 import { VNDInput } from './VNDInput';
 import { useToast } from './Toast';
 import {
-  addDebtPayment,
-  createManualTransaction,
   deleteDebt,
   listAccounts,
+  settleDebtPayment,
 } from '../lib/api';
-import { supabase } from '../lib/supabase';
 import { formatVND, unwrapError } from '../lib/format';
 import clsx from 'clsx';
 import type { Debt, FinancialAccount } from '../lib/types';
@@ -34,6 +32,8 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [errors, setErrors] = useState<{ amount?: string; account?: string }>({});
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const paymentDateRef = useRef<string | null>(null);
 
   const remainingAmount = debt?.remaining_amount ?? 0;
   const isFullPayment = mode === 'full' || amount === remainingAmount;
@@ -55,6 +55,8 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
     setAmount(0);
     setMode('partial');
     setErrors({});
+    idempotencyKeyRef.current = null;
+    paymentDateRef.current = null;
     onClose();
   }
 
@@ -73,7 +75,7 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
 
     const errs: typeof errors = {};
     if (paymentAmount <= 0) errs.amount = 'Số tiền phải lớn hơn 0';
-    if (paymentAmount > remainingAmount) errs.amount = 'Số tiền trả vượt quá số nợ còn lại';
+    if (paymentAmount > remainingAmount) errs.amount = 'Số tiền vượt quá số nợ còn lại';
     if (!accountId) errs.account = 'Vui lòng chọn tài khoản';
 
     if (Object.keys(errs).length > 0) {
@@ -82,60 +84,23 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
     }
 
     setSubmitting(true);
-    let createdPaymentId: string | null = null;
     try {
-      // Bước 1: ghi nhận debt payment (trigger DB tự trừ remaining_amount).
-      const payment = await addDebtPayment({
+      await settleDebtPayment({
         debt_id: debt.id,
+        account_id: accountId,
         amount: paymentAmount,
-        payment_date: new Date().toISOString(),
+        payment_date: paymentDateRef.current ?? (paymentDateRef.current = new Date().toISOString()),
+        note: `Thanh toán khoản ${debt.type === 'lend' ? 'cho vay' : 'vay'} - ${personName}`,
+        // Giữ nguyên key nếu người dùng retry sau timeout/unknown result.
+        idempotency_key: idempotencyKeyRef.current ?? (idempotencyKeyRef.current = crypto.randomUUID()),
       });
-      createdPaymentId = payment.id;
 
-      // Bước 2: tạo giao dịch income/expense tương ứng.
-      //   lend  → income  (thu tiền về)   → cộng vào tài khoản
-      //   borrow→ expense (trả tiền đi)   → trừ khỏi tài khoản
-      // Nếu Bước 2 fail, rollback Bước 1 để tránh debt bị trừ mà tiền không đổi.
-      try {
-        await createManualTransaction({
-          type: debt.type === 'lend' ? 'income' : 'expense',
-          account_id: accountId,
-          amount_minor: paymentAmount,
-          occurred_at: new Date().toISOString(),
-          payee: personName,
-          note: `Thanh toán khoản ${debt.type === 'lend' ? 'cho vay' : 'vay'} - ${personName}`,
-        });
-      } catch (txErr) {
-        // Rollback: xóa payment row + revert remaining_amount trên debts.
-        const reason = unwrapError(txErr);
-        console.error('[payment-modal] transaction failed, rolling back payment', {
-          paymentId: createdPaymentId,
-          debtId: debt.id,
-          amount: paymentAmount,
-          reason,
-        });
-        await supabase.from('debt_payments').delete().eq('id', createdPaymentId);
-        // Trigger không có sẵn để "restore remaining", nên tự recompute.
-        const { data: allPayments } = await supabase
-          .from('debt_payments')
-          .select('amount')
-          .eq('debt_id', debt.id);
-        const totalPaid = (allPayments ?? []).reduce(
-          (sum, p) => sum + Number(p.amount),
-          0,
-        );
-        const restored = Math.max(0, debt.original_amount - totalPaid);
-        await supabase
-          .from('debts')
-          .update({
-            remaining_amount: restored,
-            status: restored === 0 ? 'paid' : 'active',
-          })
-          .eq('id', debt.id);
-        throw new Error(`Không thể tạo giao dịch (đã rollback): ${reason}`);
+      const isLend = debt.type === 'lend';
+      if (mode === 'full') {
+        toast.success(isLend ? 'Đã thu hồi hết khoản nợ' : 'Đã trả hết khoản nợ');
+      } else {
+        toast.success(isLend ? 'Đã ghi nhận thu tiền' : 'Đã ghi nhận trả nợ');
       }
-
-      toast.success(mode === 'full' ? 'Đã trả hết khoản nợ' : 'Đã ghi nhận thanh toán');
       handleClose();
       onSuccess();
     } catch (e) {
@@ -266,7 +231,7 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
         onClick={() => setConfirmDelete(true)}
         className="w-full rounded-btn border border-red-200 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-500/10"
       >
-        Xóa khoản vay
+        {debt?.type === 'lend' ? 'Xóa khoản cho vay' : 'Xóa khoản vay'}
       </button>
     </div>
   );
@@ -276,7 +241,7 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
       <Modal
         open={open && !confirmDelete}
         onClose={handleClose}
-        title={debt?.type === 'lend' ? 'Ghi nhận trả tiền' : 'Đánh dấu đã trả'}
+        title={debt?.type === 'lend' ? 'Ghi nhận thu tiền' : 'Ghi nhận trả nợ'}
         primaryLabel="Lưu"
         onPrimary={handleSave}
         loading={submitting}
@@ -288,14 +253,14 @@ export function PaymentModal({ open, onClose, onSuccess, debt, personName }: Pro
       <Modal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title="Xóa khoản vay"
+        title={debt?.type === 'lend' ? 'Xóa khoản cho vay' : 'Xóa khoản vay'}
         primaryLabel="Xóa"
         onPrimary={handleDelete}
         loading={deleting}
         destructive
       >
         <p className="text-ink-700 dark:text-inkDark-300">
-          Bạn có chắc muốn xóa khoản vay này? Hành động này không thể hoàn tác.
+          Bạn có chắc muốn xóa khoản {debt?.type === 'lend' ? 'cho vay' : 'vay'} này? Hành động này không thể hoàn tác.
         </p>
       </Modal>
     </>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Pencil, Plus, RefreshCcw, Wallet } from 'lucide-react';
+import { Archive, Pencil, Plus, RefreshCcw, RotateCcw, Wallet } from 'lucide-react';
+import clsx from 'clsx';
 import { Modal } from '../components/Modal';
 import { FormField } from '../components/FormField';
 import { EmptyState, ErrorState, Skeleton } from '../components/EmptyState';
@@ -14,6 +15,7 @@ import {
   archiveAccount,
   createAccount,
   listAccountsWithBalances,
+  unarchiveAccount,
   updateAccount,
 } from '../lib/api';
 import { formatVND } from '../lib/format';
@@ -99,12 +101,13 @@ export function AccountsPage() {
   const [nameError, setNameError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(empty);
   const [adjustTarget, setAdjustTarget] = useState<(FinancialAccount & { balance: number }) | null>(null);
+  const [tab, setTab] = useState<'active' | 'archived'>('active');
 
   async function load() {
     setLoading(true);
     setErr(null);
     try {
-      const accs = await listAccountsWithBalances();
+      const accs = await listAccountsWithBalances(true);
       setItems(accs);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -117,11 +120,42 @@ export function AccountsPage() {
     load();
   }, []);
 
+  const activeAccounts = useMemo(() => items.filter(a => !a.is_archived), [items]);
+  const archivedAccounts = useMemo(() => items.filter(a => a.is_archived), [items]);
+  const displayedAccounts = tab === 'active' ? activeAccounts : archivedAccounts;
+
+  const totalBalance = useMemo(
+    () => activeAccounts.reduce((sum, a) => sum + a.balance, 0),
+    [activeAccounts],
+  );
+
+  const isFormDirty = useMemo(() => {
+    if (!openForm) return false;
+    if (!form.id) {
+      return (
+        form.name.trim() !== '' ||
+        form.opening_balance_minor !== 0 ||
+        form.institution_name.trim() !== '' ||
+        form.type !== 'cash'
+      );
+    }
+    const original = items.find(a => a.id === form.id);
+    if (!original) return false;
+    return (
+      form.name !== original.name ||
+      form.type !== original.type ||
+      form.color !== original.color ||
+      (form.institution_name || '') !== (original.institution_name || '') ||
+      form.icon !== original.icon
+    );
+  }, [openForm, form, items]);
+
   function openCreate() {
     setForm(empty);
     setNameError(null);
     setOpenForm(true);
   }
+
   function openEdit(a: FinancialAccount) {
     setForm({
       id: a.id,
@@ -170,10 +204,17 @@ export function AccountsPage() {
     }
   }
 
-  async function handleArchive(a: FinancialAccount) {
+  async function handleArchive(a: FinancialAccount & { balance: number }) {
+    let warning = `Tài khoản "${a.name}" sẽ bị ẩn khỏi danh sách tài khoản hoạt động. Bạn có thể xem lại và khôi phục trong tab Đã lưu trữ.`;
+    if (a.balance > 0) {
+      warning = `CẢNH BÁO TÀI CHÍNH: Tài khoản "${a.name}" vẫn còn số dư ${formatVND(a.balance)}. Bạn có chắc muốn lưu trữ không? Số dư này sẽ không còn hiển thị trong danh sách tài khoản hoạt động.`;
+    } else if (a.balance < 0) {
+      warning = `CẢNH BÁO DƯ NỢ: Tài khoản "${a.name}" đang có số dư âm ${formatVND(a.balance)}. Bạn có chắc muốn lưu trữ không?`;
+    }
+
     const ok = await confirm({
       title: 'Lưu trữ tài khoản?',
-      message: `Tài khoản "${a.name}" sẽ bị ẩn khỏi danh sách. Bạn vẫn có thể khôi phục trong cơ sở dữ liệu.`,
+      message: warning,
       confirmText: 'Lưu trữ',
       cancelText: 'Hủy',
       variant: 'danger',
@@ -188,17 +229,32 @@ export function AccountsPage() {
     }
   }
 
-  const totalBalance = useMemo(
-    () => items.reduce((sum, a) => sum + a.balance, 0),
-    [items],
-  );
+  async function handleUnarchive(a: FinancialAccount) {
+    const ok = await confirm({
+      title: 'Khôi phục tài khoản?',
+      message: `Đưa tài khoản "${a.name}" trở lại danh sách hoạt động để tiếp tục ghi nhận giao dịch.`,
+      confirmText: 'Khôi phục',
+      cancelText: 'Hủy',
+      variant: 'default',
+    });
+    if (!ok) return;
+    try {
+      await unarchiveAccount(a.id);
+      toast.push('success', 'Đã khôi phục tài khoản');
+      load();
+    } catch (e) {
+      toast.push('error', e instanceof Error ? e.message : String(e));
+    }
+  }
 
   return (
     <div className="space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-2xs font-semibold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-400">
-            {items.length} tài khoản đang hoạt động
+            {tab === 'active'
+              ? `${activeAccounts.length} tài khoản đang hoạt động`
+              : `${archivedAccounts.length} tài khoản đã lưu trữ`}
           </div>
           <h1 className="h-display mt-1 text-3xl font-semibold tracking-tight text-ink-900 dark:text-inkDark-900">
             Tài khoản
@@ -225,15 +281,43 @@ export function AccountsPage() {
 
       {err && <ErrorState message={err} onRetry={load} />}
 
-      {!loading && items.length > 0 && (
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-card bg-ink-100 p-1 dark:bg-ink-800 max-w-xs">
+        <button
+          type="button"
+          onClick={() => setTab('active')}
+          className={clsx(
+            'flex-1 rounded-btn py-1.5 text-sm font-medium transition',
+            tab === 'active'
+              ? 'bg-surface shadow-sm text-ink-900 dark:bg-surface-dark dark:text-inkDark-900'
+              : 'text-ink-600 hover:text-ink-900 dark:text-inkDark-500 dark:hover:text-inkDark-900'
+          )}
+        >
+          Đang hoạt động ({activeAccounts.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('archived')}
+          className={clsx(
+            'flex-1 rounded-btn py-1.5 text-sm font-medium transition',
+            tab === 'archived'
+              ? 'bg-surface shadow-sm text-ink-900 dark:bg-surface-dark dark:text-inkDark-900'
+              : 'text-ink-600 hover:text-ink-900 dark:text-inkDark-500 dark:hover:text-inkDark-900'
+          )}
+        >
+          Đã lưu trữ ({archivedAccounts.length})
+        </button>
+      </div>
+
+      {!loading && tab === 'active' && activeAccounts.length > 0 && (
         <div className="card flex items-center justify-between gap-4 p-5">
           <div>
             <div className="text-2xs font-semibold uppercase tracking-[0.16em] text-ink-500 dark:text-inkDark-500">
               Tổng số dư
             </div>
-<div className="num mt-1 text-[28px] leading-none tracking-tight text-ink-900 dark:text-inkDark-900">
-            {formatVND(totalBalance)}
-          </div>
+            <div className="num mt-1 text-[28px] leading-none tracking-tight text-ink-900 dark:text-inkDark-900">
+              {formatVND(totalBalance)}
+            </div>
           </div>
           <Wallet size={28} strokeWidth={1.5} className="text-brand-500" />
         </div>
@@ -245,27 +329,46 @@ export function AccountsPage() {
           <Skeleton className="h-32" />
           <Skeleton className="h-32" />
         </div>
-      ) : items.length === 0 ? (
+      ) : displayedAccounts.length === 0 ? (
         <EmptyState
-          title="Chưa có tài khoản nào"
-          description="Tạo tài khoản đầu tiên để bắt đầu theo dõi."
+          title={tab === 'active' ? 'Chưa có tài khoản nào' : 'Không có tài khoản đã lưu trữ'}
+          description={
+            tab === 'active'
+              ? 'Tạo tài khoản đầu tiên để bắt đầu theo dõi.'
+              : 'Các tài khoản bạn đã lưu trữ sẽ xuất hiện tại đây.'
+          }
           icon={<Wallet size={20} strokeWidth={1.5} />}
           action={
-            <button onClick={openCreate} className="btn-primary inline-flex items-center gap-1.5">
-              <Plus size={16} strokeWidth={2.25} /> Tạo tài khoản
-            </button>
+            tab === 'active' ? (
+              <button onClick={openCreate} className="btn-primary inline-flex items-center gap-1.5">
+                <Plus size={16} strokeWidth={2.25} /> Tạo tài khoản
+              </button>
+            ) : undefined
           }
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map(a => (
-            <div key={a.id} className="card group p-5 transition hover:shadow-pop">
+          {displayedAccounts.map(a => (
+            <div
+              key={a.id}
+              className={clsx(
+                'card group p-5 transition hover:shadow-pop',
+                a.is_archived && 'opacity-75 bg-ink-50/50 dark:bg-ink-900/30'
+              )}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <AccountIcon name={a.icon} color={a.color} size="lg" variant="solid" />
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-ink-900 dark:text-inkDark-900">
-                      {a.name}
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-semibold text-ink-900 dark:text-inkDark-900">
+                        {a.name}
+                      </span>
+                      {a.is_archived && (
+                        <span className="rounded bg-ink-200 px-1.5 py-0.5 text-2xs font-medium text-ink-700 dark:bg-ink-700 dark:text-inkDark-200">
+                          Đã lưu trữ
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-ink-500 dark:text-inkDark-500">
                       {ACCOUNT_TYPE_LABEL[a.type]}
@@ -278,25 +381,36 @@ export function AccountsPage() {
                 {formatVND(a.balance)}
               </div>
               <div className="mt-4 flex gap-2">
-                <button
-                  className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5"
-                  onClick={() => openEdit(a)}
-                >
-                  <Pencil size={13} strokeWidth={1.75} /> Sửa
-                </button>
-                <button
-                  className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5"
-                  onClick={() => setAdjustTarget(a)}
-                  title="Đặt số dư tuyệt đối"
-                >
-                  <Wallet size={13} strokeWidth={1.75} /> Số dư
-                </button>
-                <button
-                  className="btn-danger flex-1 inline-flex items-center justify-center gap-1.5"
-                  onClick={() => handleArchive(a)}
-                >
-                  <Archive size={13} strokeWidth={1.75} /> Lưu trữ
-                </button>
+                {!a.is_archived ? (
+                  <>
+                    <button
+                      className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5"
+                      onClick={() => openEdit(a)}
+                    >
+                      <Pencil size={13} strokeWidth={1.75} /> Sửa
+                    </button>
+                    <button
+                      className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5"
+                      onClick={() => setAdjustTarget(a)}
+                      title="Đặt số dư tuyệt đối"
+                    >
+                      <Wallet size={13} strokeWidth={1.75} /> Số dư
+                    </button>
+                    <button
+                      className="btn-danger flex-1 inline-flex items-center justify-center gap-1.5"
+                      onClick={() => handleArchive(a)}
+                    >
+                      <Archive size={13} strokeWidth={1.75} /> Lưu trữ
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="btn-secondary w-full inline-flex items-center justify-center gap-1.5"
+                    onClick={() => handleUnarchive(a)}
+                  >
+                    <RotateCcw size={13} strokeWidth={1.75} /> Khôi phục tài khoản
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -309,6 +423,8 @@ export function AccountsPage() {
         title={form.id ? 'Sửa tài khoản' : 'Thêm tài khoản'}
         description={form.id ? 'Cập nhật thông tin tài khoản.' : 'Tạo một tài khoản mới để theo dõi.'}
         size="lg"
+        isDirty={isFormDirty}
+        loading={submitting}
         footer={
           <>
             <button

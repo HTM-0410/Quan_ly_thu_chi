@@ -105,8 +105,12 @@ export type Transaction = {
   client_generated_id: string | null;
   classification_status: ClassificationStatus;
   metadata: Record<string, unknown>;
-  /** Account của transaction (join từ transaction_entries). Null với transfer (2 entries) hoặc nếu không tìm thấy. */
+  /** Account của transaction (join từ transaction_entries). Với transfer, account_id là from_account_id. */
   account_id: string | null;
+  /** Tài khoản nguồn (dành cho transfer: entry âm). */
+  from_account_id?: string | null;
+  /** Tài khoản đích (dành cho transfer: entry dương). */
+  to_account_id?: string | null;
   created_at: string;
   updated_at: string;
   version: number;
@@ -126,6 +130,7 @@ export type Budget = {
   created_at: string;
   updated_at: string;
   version: number;
+  category_ids?: string[];
 };
 
 export type SavingGoal = {

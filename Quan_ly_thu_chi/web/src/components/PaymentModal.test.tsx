@@ -18,9 +18,29 @@ import { ToastProvider } from './Toast';
 import { PaymentModal } from './PaymentModal';
 import type { Debt } from '../lib/domain';
 
+const mockAccounts = [
+  {
+    id: 'acc-1',
+    user_id: 'user-1',
+    name: 'Tiền mặt',
+    type: 'cash' as const,
+    currency: 'VND',
+    opening_balance_minor: 0,
+    color: '#10b981',
+    icon: 'wallet',
+    institution_name: null,
+    include_in_net_worth: true,
+    is_archived: false,
+    version: 1,
+    created_at: '2026-08-01T00:00:00Z',
+    updated_at: '2026-08-01T00:00:00Z',
+  },
+];
+
 vi.mock('../lib/api', () => ({
-  addDebtPayment: vi.fn(),
+  settleDebtPayment: vi.fn(),
   deleteDebt: vi.fn(),
+  listAccounts: vi.fn(),
 }));
 
 import * as api from '../lib/api';
@@ -63,6 +83,7 @@ function setAmountInput(value: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.listAccounts).mockResolvedValue(mockAccounts as any);
 });
 
 describe('PaymentModal', () => {
@@ -98,7 +119,7 @@ describe('PaymentModal', () => {
       expect(screen.getByText(/lớn hơn 0/i)).toBeInTheDocument();
     });
     expect(onSuccess).not.toHaveBeenCalled();
-    expect(api.addDebtPayment).not.toHaveBeenCalled();
+    expect(api.settleDebtPayment).not.toHaveBeenCalled();
   });
 
   it('Validation: amount > remaining → submit hiển thị error', async () => {
@@ -111,66 +132,76 @@ describe('PaymentModal', () => {
       expect(screen.getByText(/vượt quá số nợ còn lại/i)).toBeInTheDocument();
     });
     expect(onSuccess).not.toHaveBeenCalled();
+    expect(api.settleDebtPayment).not.toHaveBeenCalled();
   });
 
-  it('Submit "Trả một phần" hợp lệ → addDebtPayment + onSuccess', async () => {
+  it('Submit "Trả một phần" hợp lệ → settleDebtPayment + onSuccess', async () => {
     const { onSuccess } = renderModal();
-    vi.mocked(api.addDebtPayment).mockResolvedValue({
-      id: 'p1',
-      debt_id: baseDebt.id,
-      amount: 50_000_000,
-      payment_date: '2026-08-03T10:00:00Z',
-      created_at: '2026-08-03T10:00:00Z',
+    vi.mocked(api.settleDebtPayment).mockResolvedValue({
+      success: true,
+      payment_id: 'p1',
+      transaction_id: 'tx-1',
+      remaining_amount: 10_000_000,
+      status: 'active',
     });
+
+    // Chờ load accounts hoàn tất
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('acc-1'));
 
     // '500000' → 50_000_000 minor (500k VND) < 60M → hợp lệ
     setAmountInput('500000');
     fireEvent.click(screen.getByText('Lưu'));
 
     await waitFor(() => {
-      expect(api.addDebtPayment).toHaveBeenCalledWith({
+      expect(api.settleDebtPayment).toHaveBeenCalledWith(expect.objectContaining({
         debt_id: baseDebt.id,
+        account_id: 'acc-1',
         amount: 50_000_000,
         payment_date: expect.any(String),
-      });
+        note: expect.stringContaining('cho vay'),
+        idempotency_key: expect.any(String),
+      }));
     });
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalled();
     });
   });
 
-  it('Submit "Trả hết" → addDebtPayment với amount = remaining', async () => {
+  it('Submit "Trả hết" → settleDebtPayment với amount = remaining', async () => {
     const { onSuccess } = renderModal();
-    vi.mocked(api.addDebtPayment).mockResolvedValue({
-      id: 'p2',
-      debt_id: baseDebt.id,
-      amount: baseDebt.remaining_amount,
-      payment_date: '2026-08-03T10:00:00Z',
-      created_at: '2026-08-03T10:00:00Z',
+    vi.mocked(api.settleDebtPayment).mockResolvedValue({
+      success: true,
+      payment_id: 'p2',
+      transaction_id: 'tx-2',
+      remaining_amount: 0,
+      status: 'paid',
     });
+
+    // Chờ load accounts hoàn tất
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('acc-1'));
 
     fireEvent.click(screen.getByText(/Trả hết/));
     fireEvent.click(screen.getByText('Lưu'));
 
     await waitFor(() => {
-      expect(api.addDebtPayment).toHaveBeenCalledWith({
+      expect(api.settleDebtPayment).toHaveBeenCalledWith(expect.objectContaining({
         debt_id: baseDebt.id,
+        account_id: 'acc-1',
         amount: baseDebt.remaining_amount,
         payment_date: expect.any(String),
-      });
+        note: expect.stringContaining('cho vay'),
+        idempotency_key: expect.any(String),
+      }));
     });
     expect(onSuccess).toHaveBeenCalled();
   });
 
-  // TODO: onRecordPayment chưa implement - re-enable khi PaymentModal hỗ trợ prop này.
-  // it.skip('Type "lend" → onRecordPayment được gọi trước addDebtPayment', async () => {
-  //   const { onRecordPayment } = renderModal();
-  //   ...
-  // });
-
   it('API lỗi → toast error hiển thị, modal không đóng', async () => {
     const { onSuccess } = renderModal();
-    vi.mocked(api.addDebtPayment).mockRejectedValue(new Error('RPC failed'));
+    vi.mocked(api.settleDebtPayment).mockRejectedValue(new Error('RPC failed'));
+
+    // Chờ load accounts hoàn tất
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('acc-1'));
 
     setAmountInput('50000');
     fireEvent.click(screen.getByText('Lưu'));

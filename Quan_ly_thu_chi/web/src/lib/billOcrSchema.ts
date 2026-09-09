@@ -20,13 +20,11 @@ export const BillItemSchema = z.object({
       z.number().positive('Số lượng phải > 0'),
     )
     .default(1),
-  // VND × 100 (minor). AI đôi khi trả VND thẳng → auto ×100 nếu < 100_000.
+  // VND × 100 (minor unit). Tuân thủ nghiêm ngặt hợp đồng F13: không tự đoán nhân 100 theo ngưỡng.
   unit_price: z.preprocess(
     (raw) => {
       const n = typeof raw === 'number' ? raw : Number(raw);
       if (!Number.isFinite(n) || n < 0) return n;
-      // < 100_000 và >= 100 → chưa nhân 100.
-      if (n < 100_000 && n >= 100) return Math.round(n * 100);
       return Math.round(n);
     },
     z
@@ -34,12 +32,11 @@ export const BillItemSchema = z.object({
       .int('Đơn giá phải là số nguyên (VND × 100)')
       .nonnegative('Đơn giá không được âm'),
   ),
-  // line_total = quantity × unit_price (có thể sai số do AI tính nhẩm).
+  // line_total = quantity × unit_price (minor unit).
   line_total: z.preprocess(
     (raw) => {
       const n = typeof raw === 'number' ? raw : Number(raw);
       if (!Number.isFinite(n) || n < 0) return n;
-      if (n < 100_000 && n >= 100) return Math.round(n * 100);
       return Math.round(n);
     },
     z
@@ -60,8 +57,6 @@ export const BillParseResultSchema = z.object({
       if (raw === null || raw === undefined) return null;
       const n = typeof raw === 'number' ? raw : Number(raw);
       if (!Number.isFinite(n) || n < 0) return null;
-      // Auto ×100 nếu < 1.000.000 và >= 100 (treat as VND)
-      if (n < 1_000_000 && n >= 100) return Math.round(n * 100);
       return Math.round(n);
     },
     z.number().int().nonnegative().nullable(),

@@ -14,7 +14,7 @@ CREATE OR REPLACE FUNCTION create_manual_transaction(
   p_account_id UUID,
   p_amount_minor BIGINT,
   p_currency CHAR(3) DEFAULT 'VND',
-  p_occurred_at TIMESTAMPTZ,
+  p_occurred_at TIMESTAMPTZ DEFAULT NULL,
   p_category_id UUID DEFAULT NULL,
   p_payee TEXT DEFAULT NULL,
   p_note TEXT DEFAULT NULL,

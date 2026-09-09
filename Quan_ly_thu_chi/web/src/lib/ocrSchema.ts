@@ -8,6 +8,7 @@
 import { z } from 'zod';
 
 export const OCR_SCHEMA_VERSION = 1 as const;
+export const MAX_OCR_AMOUNT_MINOR = 10_000_000_000_000;
 
 /** Một giao dịch trích xuất từ ảnh. */
 export const OcrTransactionSchema = z.object({
@@ -30,8 +31,8 @@ export const OcrTransactionSchema = z.object({
     z
       .number()
       .int('Số tiền phải là số nguyên (VND multiplied by 100 — minor unit)')
-      .nonnegative('Số tiền không được âm')
-      .max(10_000_000_000_000, 'Số tiền quá lớn'),
+      .positive('Số tiền phải lớn hơn 0')
+      .max(MAX_OCR_AMOUNT_MINOR, 'Số tiền quá lớn'),
   ),
   currency: z.literal('VND').default('VND'),
   payee: z.string().nullable().optional(),
@@ -168,6 +169,8 @@ export const GEMINI_RESPONSE_SCHEMA = {
           type: { type: 'string', enum: ['income', 'expense'] },
           amount_minor: {
             type: 'integer',
+            minimum: 1,
+            maximum: MAX_OCR_AMOUNT_MINOR,
             description: 'VND × 100. LUÔN DƯƠNG — lấy trị tuyệt đối của số trên ảnh.',
           },
         },

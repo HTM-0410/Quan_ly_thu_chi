@@ -10,9 +10,8 @@
 //   ErrorBoundary sẽ hiển thị hướng dẫn cấu hình.
 // =============================================================
 
-const DEFAULT_SUPABASE_URL = 'https://kldtrthnslpdhqrwlglg.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtsZHRydGhuc2xwZGhxcndsZ2xnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzNTQ5MjMsImV4cCI6MjEwMDkzMDkyM30.oqI13DrYiLXjl0W9cdDIgYlB9-9UUih0tXfYTN94TKc';
+const DEFAULT_SUPABASE_URL = 'https://qphevhmaczuazsvhbwfb.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_zCpxzBaOyuP0AbobSKlwAg_-xbS9Ao_';
 
 const RAW_SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
 const RAW_SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
@@ -42,40 +41,22 @@ export const LOCALE: string = (import.meta.env.VITE_LOCALE as string | undefined
 export const CURRENCY: string = (import.meta.env.VITE_CURRENCY as string | undefined) ?? 'VND';
 
 // =============================================================
-// OCR (LLM Vision) config — Gemini 3.5 Flash Lite
-// API key KHÔNG commit, đọc từ .env.local. Nếu thiếu → OCR bị disable
-// nhưng app vẫn chạy (ReceiptImportModal sẽ hiện hướng dẫn cấu hình).
+// OCR (LLM Vision) config.
+// Provider secret chỉ tồn tại ở Worker; client chỉ biết endpoint proxy.
 // =============================================================
 
-const RAW_GEMINI_API_KEY = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim();
-const RAW_OCR_MODEL = (import.meta.env.VITE_OCR_MODEL as string | undefined)?.trim();
+// OCR luôn đi qua same-origin Worker proxy và yêu cầu session hiện tại.
+export const OCR_ENABLED: boolean = true;
 
-export const GEMINI_API_KEY: string = RAW_GEMINI_API_KEY ?? '';
-export const OCR_MODEL: string = RAW_OCR_MODEL || 'gemini-3.1-flash-lite';
-export const OCR_ENABLED: boolean = GEMINI_API_KEY.length > 0;
-
-/** Helper throw khi gọi OCR mà thiếu key. UI catch để hiện fallback. */
+/** Helper throw khi proxy chưa sẵn sàng hoặc người dùng chưa đăng nhập. */
 export class MissingOcrConfigError extends Error {
-  constructor() {
-    super('Thiếu VITE_GEMINI_API_KEY trong .env.local — xem hướng dẫn trong modal.');
+  constructor(message = 'OCR proxy chưa được cấu hình hoặc phiên đăng nhập đã hết hạn.') {
+    super(message);
     this.name = 'MissingOcrConfigError';
   }
 }
 
 // =============================================================
-// Debug log trạng thái OCR khi app khởi động.
-// Chỉ in độ dài key + prefix 8 ký tự đầu (KHÔNG in key thật ra console)
-// để tránh lộ nếu share log file / screenshot.
-// Vite sẽ tự loại bỏ console.log trong production build.
-// =============================================================
-if (!IS_PROD) {
-  const keyLength = GEMINI_API_KEY.length;
-  const keyPrefix = keyLength >= 8 ? `${GEMINI_API_KEY.slice(0, 8)}…` : '(rỗng)';
-  // eslint-disable-next-line no-console
-  console.log(
-    `[ocr] ${OCR_ENABLED ? '✅ ENABLED' : '❌ DISABLED'} · model=${OCR_MODEL} · key.length=${keyLength} · key.prefix=${keyPrefix}`,
-  );
-}
 
 /** True nếu đang dùng giá trị fallback (chưa cấu hình env). */
 export const IS_USING_FALLBACK: boolean =

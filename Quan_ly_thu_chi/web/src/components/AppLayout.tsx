@@ -20,6 +20,7 @@ import { useAuth } from '../lib/auth';
 import { IS_USING_FALLBACK } from '../lib/config';
 import { ThemeToggle } from './ThemeToggle';
 import { Logo } from './Logo';
+import { MobileBottomNav } from './MobileBottomNav';
 
 interface NavItem {
   to: string;
@@ -28,17 +29,40 @@ interface NavItem {
   end?: boolean;
 }
 
-const NAV: NavItem[] = [
-  { to: '/dashboard', label: 'Tổng quan', icon: Activity, end: true },
-  { to: '/transactions', label: 'Giao dịch', icon: ArrowLeftRight },
-  { to: '/accounts', label: 'Tài khoản', icon: Wallet },
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const DESKTOP_NAV_SECTIONS: NavSection[] = [
+  {
+    title: 'Hoạt động',
+    items: [
+      { to: '/dashboard', label: 'Tổng quan', icon: Activity, end: true },
+      { to: '/transactions', label: 'Giao dịch', icon: ArrowLeftRight },
+      { to: '/recurring', label: 'Định kỳ', icon: Repeat },
+    ],
+  },
+  {
+    title: 'Tài sản & Sổ nợ',
+    items: [
+      { to: '/accounts', label: 'Tài khoản & Ví', icon: Wallet },
+      { to: '/debts', label: 'Công nợ', icon: CreditCard },
+      { to: '/people', label: 'Người quen', icon: Users },
+    ],
+  },
+  {
+    title: 'Kế hoạch & Báo cáo',
+    items: [
+      { to: '/budgets', label: 'Ngân sách', icon: PieChart },
+      { to: '/goals', label: 'Mục tiêu', icon: Target },
+      { to: '/reports', label: 'Báo cáo', icon: TrendingUp },
+    ],
+  },
+];
+
+const SYSTEM_NAV_ITEMS: NavItem[] = [
   { to: '/categories', label: 'Danh mục', icon: Tag },
-  { to: '/budgets', label: 'Ngân sách', icon: PieChart },
-  { to: '/goals', label: 'Mục tiêu', icon: Target },
-  { to: '/recurring', label: 'Định kỳ', icon: Repeat },
-  { to: '/reports', label: 'Báo cáo', icon: TrendingUp },
-  { to: '/people', label: 'Người quen', icon: Users },
-  { to: '/debts', label: 'Công nợ', icon: CreditCard },
   { to: '/settings', label: 'Cài đặt', icon: SettingsIcon },
 ];
 
@@ -46,42 +70,90 @@ function BrandLogo() {
   return <Logo size={36} />;
 }
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
+function DesktopNavList() {
   return (
-    <ul className="flex flex-col gap-0.5">
-      {NAV.map(item => (
-        <li key={item.to}>
-          <NavLink
-            to={item.to}
-            end={item.end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              clsx(
-                'group relative flex items-center gap-3 rounded-btn px-3 py-2 text-sm font-medium transition',
-                isActive
-                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300'
-                  : 'text-ink-700 hover:bg-ink-50 hover:text-ink-900 dark:text-inkDark-500 dark:hover:bg-ink-800 dark:hover:text-inkDark-900',
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <span
-                  className={clsx(
-                    'absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand-500 transition-opacity',
-                    isActive ? 'opacity-100' : 'opacity-0',
+    <div className="flex flex-col gap-4">
+      {DESKTOP_NAV_SECTIONS.map(section => (
+        <div key={section.title}>
+          <div className="px-3 pb-1 text-2xs font-semibold uppercase tracking-[0.16em] text-ink-400 dark:text-inkDark-400">
+            {section.title}
+          </div>
+          <ul className="flex flex-col gap-0.5">
+            {section.items.map(item => (
+              <li key={item.to}>
+                <NavLink
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    clsx(
+                      'group relative flex items-center gap-3 rounded-btn px-3 py-2 text-sm font-medium transition',
+                      isActive
+                        ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
+                        : 'text-ink-700 hover:bg-ink-50 hover:text-ink-900 dark:text-inkDark-500 dark:hover:bg-ink-800 dark:hover:text-inkDark-900',
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span
+                        className={clsx(
+                          'absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand-500 transition-opacity',
+                          isActive ? 'opacity-100' : 'opacity-0',
+                        )}
+                        aria-hidden="true"
+                      />
+                      <item.icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
+                      <span className="flex-1">{item.label}</span>
+                      {isActive && <span className="sr-only">(trang hiện tại)</span>}
+                    </>
                   )}
-                  aria-hidden="true"
-                />
-                <item.icon size={18} strokeWidth={1.75} />
-                <span className="flex-1">{item.label}</span>
-                {isActive && <span className="sr-only">(trang hiện tại)</span>}
-              </>
-            )}
-          </NavLink>
-        </li>
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </div>
       ))}
-    </ul>
+
+      {/* Cụm Cấu hình & Hệ thống */}
+      <div className="pt-2 border-t border-ink-100 dark:border-ink-800/80">
+        <div className="px-3 pb-1 text-2xs font-semibold uppercase tracking-[0.16em] text-ink-400 dark:text-inkDark-400">
+          Cấu hình
+        </div>
+        <ul className="flex flex-col gap-0.5">
+          {SYSTEM_NAV_ITEMS.map(item => (
+            <li key={item.to}>
+              <NavLink
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  clsx(
+                    'group relative flex items-center gap-3 rounded-btn px-3 py-2 text-sm font-medium transition',
+                    isActive
+                      ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
+                      : 'text-ink-700 hover:bg-ink-50 hover:text-ink-900 dark:text-inkDark-500 dark:hover:bg-ink-800 dark:hover:text-inkDark-900',
+                  )
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <span
+                      className={clsx(
+                        'absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-brand-500 transition-opacity',
+                        isActive ? 'opacity-100' : 'opacity-0',
+                      )}
+                      aria-hidden="true"
+                    />
+                    <item.icon size={18} strokeWidth={isActive ? 2.25 : 1.75} />
+                    <span className="flex-1">{item.label}</span>
+                    {isActive && <span className="sr-only">(trang hiện tại)</span>}
+                  </>
+                )}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -131,10 +203,7 @@ export function AppLayout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Điều hướng chính">
-          <div className="px-2 pb-2 text-2xs font-semibold uppercase tracking-[0.18em] text-ink-400 dark:text-inkDark-400">
-            Làm việc
-          </div>
-          <NavList />
+          <DesktopNavList />
         </nav>
 
         <div className="border-t border-ink-100 px-3 py-3 dark:border-ink-800">
@@ -164,60 +233,37 @@ export function AppLayout() {
         </div>
       </aside>
 
-      {/* Main */}
+      {/* Main Container */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile top bar */}
         <header className="flex items-center justify-between gap-2 border-b border-ink-100 bg-surface-raised px-4 py-3 dark:border-ink-800 dark:bg-surface-dark-raised md:hidden">
           <BrandLogo />
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <ThemeToggle />
-            <button
-              onClick={handleSignOut}
-              className="btn-secondary text-xs"
-              aria-label="Đăng xuất"
+            <div
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-brand-600 text-xs font-semibold text-white shadow-sm"
+              aria-hidden="true"
+              title={displayName}
             >
-              <LogOut size={14} strokeWidth={1.75} /> Đăng xuất
-            </button>
+              {initial}
+            </div>
           </div>
         </header>
 
-        {/* Mobile horizontal nav */}
-        <div className="border-b border-ink-100 bg-surface-raised dark:border-ink-800 dark:bg-surface-dark-raised md:hidden">
-          <nav
-            className="flex gap-0.5 overflow-x-auto px-2 py-2"
-            aria-label="Điều hướng chính"
-          >
-            {NAV.map(item => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  clsx(
-                    'flex shrink-0 flex-col items-center gap-1 rounded-btn px-3 py-1.5 text-2xs font-medium transition',
-                    isActive
-                      ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
-                      : 'text-ink-600 hover:bg-ink-50 hover:text-ink-900 dark:text-inkDark-500 dark:hover:bg-ink-800',
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <item.icon size={18} strokeWidth={1.75} />
-                    <span className="whitespace-nowrap">{item.label}</span>
-                    {isActive && <span className="sr-only">(trang hiện tại)</span>}
-                  </>
-                )}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
-
+        {/* Nội dung chính (thêm pb-20 trên mobile để không bị thanh Bottom Nav che) */}
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+          <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 pb-24 md:pb-8">
             <Outlet />
           </div>
         </main>
+
+        {/* Mobile Bottom Navigation Bar & Drawer */}
+        <MobileBottomNav
+          displayName={displayName}
+          email={email}
+          initial={initial}
+          onSignOut={handleSignOut}
+        />
       </div>
     </div>
   );

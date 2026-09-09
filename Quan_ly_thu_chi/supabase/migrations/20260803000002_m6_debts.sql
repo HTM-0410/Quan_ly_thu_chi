@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS public.debts (
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   person_id UUID NOT NULL REFERENCES public.people(id) ON DELETE RESTRICT,
   type TEXT NOT NULL CHECK (type IN ('lend', 'borrow')),
+  -- Compatibility columns used by later debt RPCs and the demo seed.
+  counterparty_name TEXT,
+  counterparty_phone TEXT,
   original_amount BIGINT NOT NULL CHECK (original_amount > 0),
   remaining_amount BIGINT NOT NULL CHECK (remaining_amount >= 0),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paid')),
@@ -52,9 +55,12 @@ CREATE INDEX idx_debts_type ON public.debts(type);
 CREATE TABLE IF NOT EXISTS public.debt_payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   debt_id UUID NOT NULL REFERENCES public.debts(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   amount BIGINT NOT NULL CHECK (amount > 0),
   payment_date TIMESTAMPTZ NOT NULL DEFAULT now(),
   note TEXT,
+  payment_type TEXT DEFAULT 'payment',
+  notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

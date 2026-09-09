@@ -10,6 +10,7 @@ import {
   topSpendDays,
   type DailyExpense,
 } from './daily';
+import { monthRangeInTz, toLocalDateString } from './format';
 import type { Transaction } from './types';
 
 function makeTx(overrides: Partial<Transaction> = {}): Transaction {
@@ -47,6 +48,15 @@ describe('localDateKey', () => {
 });
 
 describe('groupByDay', () => {
+  it('excludes principal repayments from consumer income and expense heatmaps', () => {
+    const rows = [
+      makeTx({ amount_minor: 100 }),
+      makeTx({ type: 'income', amount_minor: 400, metadata: { is_debt_principal: true } }),
+      makeTx({ amount_minor: 300, metadata: { is_debt_principal: 'true' } }),
+    ];
+    const day = [...groupByDay(rows, 'Asia/Ho_Chi_Minh').values()][0]!;
+    expect(day).toMatchObject({ amount_minor: 100, income_minor: 0, count: 1 });
+  });
   it('sums multiple expenses on same day (local time)', () => {
     // Cùng ngày local 2026-08-15 dù khác giờ UTC
     const txs: Transaction[] = [
@@ -61,13 +71,14 @@ describe('groupByDay', () => {
     expect(entry.income_minor).toBe(0);
   });
 
-  it('skips voided transactions but keeps pending', () => {
+  it('counts posted only; pending and voided do not affect executed stats', () => {
     const txs: Transaction[] = [
       makeTx({ type: 'income', amount_minor: 999 }),
+      makeTx({ status: 'pending', type: 'income', amount_minor: 888 }),
       makeTx({ status: 'voided', amount_minor: 999 }),
     ];
     const map = groupByDay(txs, 'Asia/Ho_Chi_Minh');
-    // Income vẫn đếm; voided bỏ qua.
+    // Chỉ income đã posted được tính.
     expect(map.size).toBe(1);
     const entry = Array.from(map.values())[0]!;
     expect(entry.income_minor).toBe(999);
@@ -223,5 +234,26 @@ describe('compactVNDMinor', () => {
   it('formats tỷ for ≥1 tỷ', () => {
     expect(compactVNDMinor(120_000_000_000)).toBe('1.2tỷ'); // 1.2 tỷ
     expect(compactVNDMinor(250_000_000_000)).toBe('2.5tỷ');
+  });
+});
+
+describe('toLocalDateString & monthRangeInTz (F01 Date Range Guards)', () => {
+  it('formats local date components without UTC day-shift anomaly', () => {
+    // September 1, 2026 local
+    const startOfMonth = new Date(2026, 8, 1);
+    expect(toLocalDateString(startOfMonth)).toBe('2026-09-01');
+
+    // September 30, 2026 local
+    const endOfMonth = new Date(2026, 8 + 1, 0);
+    expect(toLocalDateString(endOfMonth)).toBe('2026-09-30');
+  });
+
+  it('computes monthRangeInTz for Asia/Ho_Chi_Minh correctly (covers full local month)', () => {
+    // September 2026 in Asia/Ho_Chi_Minh (UTC+7):
+    // 2026-09-01 00:00:00 UTC+7 = 2026-08-31 17:00:00 UTC
+    // 2026-10-01 00:00:00 UTC+7 = 2026-09-30 17:00:00 UTC
+    const { start, end } = monthRangeInTz(2026, 8, 'Asia/Ho_Chi_Minh');
+    expect(start.toISOString()).toBe('2026-08-31T17:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-09-30T17:00:00.000Z');
   });
 });

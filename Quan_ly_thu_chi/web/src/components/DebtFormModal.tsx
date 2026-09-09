@@ -3,10 +3,10 @@ import { Modal } from './Modal';
 import { FormField } from './FormField';
 import { VNDInput } from './VNDInput';
 import { useToast } from './Toast';
-import { createDebt, createPerson, getPeople } from '../lib/api';
+import { createDebt, createPerson, getPeople, listAccounts } from '../lib/api';
 import { unwrapError } from '../lib/format';
 import clsx from 'clsx';
-import type { Person, DebtType } from '../lib/types';
+import type { Person, DebtType, FinancialAccount } from '../lib/types';
 
 interface Props {
   open: boolean;
@@ -21,6 +21,8 @@ interface Form {
   type: DebtType;
   amount: number;
   notes: string;
+  disburseFromWallet: boolean;
+  disburse_account_id: string;
 }
 
 const EMPTY: Form = {
@@ -30,19 +32,34 @@ const EMPTY: Form = {
   type: 'lend',
   amount: 0,
   notes: '',
+  disburseFromWallet: false,
+  disburse_account_id: '',
 };
 
 export function DebtFormModal({ open, onClose, onSuccess }: Props) {
   const toast = useToast();
   const [people, setPeople] = useState<Person[]>([]);
+  const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<Form>(EMPTY);
-  const [errors, setErrors] = useState<{ person?: string; amount?: string }>({});
+  const [errors, setErrors] = useState<{ person?: string; amount?: string; account?: string }>({});
 
   useEffect(() => {
     if (open) {
       getPeople()
         .then(setPeople)
+        .catch(e => toast.error(unwrapError(e)));
+      listAccounts()
+        .then(list => {
+          const active = list.filter(a => !a.is_archived);
+          setAccounts(active);
+          if (active.length > 0) {
+            setForm(f => ({
+              ...f,
+              disburse_account_id: f.disburse_account_id || active[0].id,
+            }));
+          }
+        })
         .catch(e => toast.error(unwrapError(e)));
     }
   }, [open]);
@@ -62,6 +79,9 @@ export function DebtFormModal({ open, onClose, onSuccess }: Props) {
     if (!personId && !personName) errs.person = 'Vui lòng chọn hoặc thêm người';
     if (form.person_id === '__new__' && !personName) errs.person = 'Vui lòng nhập tên người mới';
     if (form.amount <= 0) errs.amount = 'Số tiền phải lớn hơn 0';
+    if (form.disburseFromWallet && !form.disburse_account_id) {
+      errs.account = 'Vui lòng chọn tài khoản';
+    }
 
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
@@ -83,6 +103,7 @@ export function DebtFormModal({ open, onClose, onSuccess }: Props) {
         type: form.type,
         original_amount: form.amount,
         notes: form.notes.trim() || null,
+        disburse_account_id: form.disburseFromWallet ? form.disburse_account_id : null,
       });
 
       toast.success('Đã tạo khoản nợ');
@@ -196,6 +217,60 @@ export function DebtFormModal({ open, onClose, onSuccess }: Props) {
             rows={2}
           />
         </FormField>
+
+        {/* Wallet Disbursement Option (F08) */}
+        <div className="rounded-card border border-ink-100 bg-ink-50/50 p-3 dark:border-ink-800 dark:bg-ink-800/50">
+          <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-ink-700 dark:text-inkDark-300">
+            <input
+              type="checkbox"
+              checked={form.disburseFromWallet}
+              onChange={e => {
+                const checked = e.target.checked;
+                setForm(f => ({
+                  ...f,
+                  disburseFromWallet: checked,
+                  disburse_account_id: checked && !f.disburse_account_id && accounts[0] ? accounts[0].id : f.disburse_account_id,
+                }));
+                setErrors(prev => ({ ...prev, account: undefined }));
+              }}
+              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              {form.type === 'lend'
+                ? 'Trừ tiền ngay từ tài khoản (xuất tiền cho vay)'
+                : 'Cộng tiền ngay vào tài khoản (nhận tiền đi vay)'}
+            </span>
+          </label>
+          <p className="mt-1 text-xs text-ink-500 dark:text-inkDark-400 pl-6">
+            Bỏ chọn nếu đây là khoản nợ cũ hoặc theo dõi ngoài, không ảnh hưởng số dư ví hiện tại.
+          </p>
+
+          {form.disburseFromWallet && (
+            <div className="mt-3 pl-6">
+              <FormField
+                label={form.type === 'lend' ? 'Tài khoản xuất tiền' : 'Tài khoản nhận tiền'}
+                required
+                error={errors.account}
+              >
+                <select
+                  value={form.disburse_account_id}
+                  onChange={e => {
+                    setForm(f => ({ ...f, disburse_account_id: e.target.value }));
+                    setErrors(prev => ({ ...prev, account: undefined }));
+                  }}
+                  className="input w-full"
+                >
+                  {accounts.length === 0 && <option value="">— Chưa có tài khoản —</option>}
+                  {accounts.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} {a.institution_name ? `(${a.institution_name})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
   );

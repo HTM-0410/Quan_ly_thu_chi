@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -19,6 +20,8 @@ interface ModalProps {
   onSecondary?: () => void;
   secondaryDestructive?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** Có thay đổi chưa lưu -> xác nhận trước khi đóng qua backdrop/Escape */
+  isDirty?: boolean;
 }
 
 export function Modal({
@@ -36,6 +39,7 @@ export function Modal({
   onSecondary,
   secondaryDestructive = false,
   size = 'md',
+  isDirty = false,
 }: ModalProps) {
   const titleId = useId();
   const descId = useId();
@@ -43,6 +47,19 @@ export function Modal({
   const previousActiveRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
+
+  function handleAttemptClose() {
+    if (loadingRef.current) return;
+    if (isDirtyRef.current) {
+      const ok = window.confirm('Bạn có thay đổi chưa lưu. Bạn có chắc muốn hủy bỏ không?');
+      if (!ok) return;
+    }
+    onCloseRef.current();
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -50,7 +67,8 @@ export function Modal({
 
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        onCloseRef.current();
+        if (loadingRef.current) return;
+        handleAttemptClose();
         return;
       }
       if (e.key === 'Tab' && dialogRef.current) {
@@ -98,10 +116,10 @@ export function Modal({
           ? 'max-w-5xl'
           : 'max-w-md';
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center bg-ink-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4 dark:bg-black/60"
-      onClick={onClose}
+      className="fixed inset-0 z-[60] flex items-center justify-center p-3.5 sm:p-4 bg-ink-900/50 backdrop-blur-sm dark:bg-black/70 animate-in fade-in-0 duration-200"
+      onClick={handleAttemptClose}
     >
       <div
         ref={dialogRef}
@@ -110,8 +128,8 @@ export function Modal({
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
         className={clsx(
-          'flex w-full max-h-[92vh] flex-col overflow-hidden rounded-t-card border border-ink-200 bg-surface-raised shadow-pop',
-          'sm:rounded-card dark:border-ink-800 dark:bg-surface-dark-raised',
+          'flex w-full max-h-[88vh] sm:max-h-[90vh] flex-col overflow-hidden rounded-card border border-ink-200 bg-surface-raised shadow-pop',
+          'dark:border-ink-800 dark:bg-surface-dark-raised animate-in zoom-in-95 duration-200',
           width,
         )}
         onClick={e => e.stopPropagation()}
@@ -129,8 +147,9 @@ export function Modal({
           </div>
           <button
             type="button"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-btn text-ink-500 transition hover:bg-ink-50 hover:text-ink-900 dark:text-inkDark-500 dark:hover:bg-ink-800 dark:hover:text-inkDark-900"
-            onClick={onClose}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-btn text-ink-500 transition hover:bg-ink-50 hover:text-ink-900 disabled:pointer-events-none disabled:opacity-40 dark:text-inkDark-500 dark:hover:bg-ink-800 dark:hover:text-inkDark-900"
+            onClick={handleAttemptClose}
+            disabled={loading}
             aria-label="Đóng"
           >
             <X size={16} strokeWidth={2} />
@@ -181,4 +200,8 @@ export function Modal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined'
+    ? createPortal(modalContent, document.body)
+    : modalContent;
 }

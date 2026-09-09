@@ -1,0 +1,11 @@
+{
+  "database": "acceptance_20260908111522",
+  "concurrentRequests": 2,
+  "result": {
+    "transactions": 2,
+    "payments": 1,
+    "remaining": 600,
+    "operations": 1
+  },
+  "status": "PASS"
+}

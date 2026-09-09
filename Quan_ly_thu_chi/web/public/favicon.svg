@@ -1,17 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <defs>
-    <radialGradient id="g" cx="30%" cy="25%" r="80%">
-      <stop offset="0%" stop-color="#d39272"/>
-      <stop offset="45%" stop-color="#b8451f"/>
-      <stop offset="100%" stop-color="#3d160b"/>
-    </radialGradient>
+    <linearGradient id="favBg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ea580c"/>
+      <stop offset="0.55" stop-color="#c2410c"/>
+      <stop offset="1" stop-color="#7c2d12"/>
+    </linearGradient>
+    <linearGradient id="favGold" x1="14" y1="14" x2="50" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fef08a"/>
+      <stop offset="0.5" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#d97706"/>
+    </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="14" fill="url(#g)"/>
-  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" fill="none" stroke="#ffffff" stroke-opacity="0.18"/>
-  <g stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" fill="none">
-    <path d="M16 23 H40" opacity="0.9"/>
-    <path d="M16 32 H36" opacity="0.7"/>
-    <path d="M16 41 H40" opacity="0.9"/>
-  </g>
-  <circle cx="46" cy="32" r="3.6" fill="#ffffff" opacity="0.95"/>
+
+  <rect width="64" height="64" rx="18" fill="url(#favBg)"/>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="17.25" stroke="#ffffff" stroke-opacity="0.22" stroke-width="1.5"/>
+
+  <!-- Thu Arc (Inflow) -->
+  <path d="M18 32C18 24.27 24.27 18 32 18C38.2 18 43.5 21.9 45.3 27.5" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round"/>
+  <path d="M40 27.5H46V21" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Chi Arc (Outflow) -->
+  <path d="M46 32C46 39.73 39.73 46 32 46C25.8 46 20.5 42.1 18.7 36.5" stroke="url(#favGold)" stroke-width="4.2" stroke-linecap="round"/>
+  <path d="M24 36.5H18V43" stroke="url(#favGold)" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Center Prosperity Coin -->
+  <circle cx="32" cy="32" r="5.8" fill="#ffffff"/>
+  <rect x="29.5" y="29.5" width="5" height="5" rx="1" fill="#7c2d12"/>
 </svg>

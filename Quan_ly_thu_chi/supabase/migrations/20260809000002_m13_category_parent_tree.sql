@@ -13,6 +13,13 @@
 -- ================================================================
 CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);
 
+-- M14 adds the referenced global_categories table later in the migration
+-- chain. Keep the column available for this migration's RPC definitions.
+ALTER TABLE public.transactions
+  ADD COLUMN IF NOT EXISTS global_category_id UUID;
+CREATE INDEX IF NOT EXISTS idx_transactions_global_category_id
+  ON public.transactions(global_category_id);
+
 -- ================================================================
 -- 2. Trigger: ngăn vòng lặp CHA ↔ CON (parent_id không được trỏ vào chính nó)
 -- ================================================================

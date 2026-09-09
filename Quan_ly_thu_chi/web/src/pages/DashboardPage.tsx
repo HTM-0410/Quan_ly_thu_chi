@@ -1,27 +1,35 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  AlertCircle,
+  AlertTriangle,
   ArrowLeftRight,
   ArrowUpRight,
   Plus,
+  Tag,
   TrendingDown,
   TrendingUp,
   Wallet as WalletIcon,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import clsx from 'clsx';
 import { EmptyState, ErrorState, Skeleton } from '../components/EmptyState';
 import { Spinner } from '../components/Spinner';
 import { CategoryIcon } from '../components/CategoryIcon';
 import { AccountIcon } from '../components/AccountIcon';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
+import { useAuth } from '../lib/auth';
 import {
+  getBudgetProgress,
   getNetWorth,
   getTransactionsSummary,
   listAccountsWithBalances,
+  listBudgets,
   listCategories,
+  listRecurring,
   listTransactions,
 } from '../lib/api';
-import { formatDateTime, formatVND } from '../lib/format';
+import { formatDateTime, formatVND, toLocalDateString } from '../lib/format';
 import { resolveCategory } from '../lib/categoryResolve';
 import type { Category, FinancialAccount, Transaction } from '../lib/types';
 import {
@@ -33,21 +41,26 @@ interface AccountWithBalance extends FinancialAccount {
   balance: number;
 }
 
-function startOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-function endOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+interface ActionableInsight {
+  id: string;
+  type: 'danger' | 'warning' | 'info';
+  title: string;
+  description: string;
+  linkText: string;
+  linkTo: string;
 }
 
 export function DashboardPage() {
   useDocumentTitle('Tổng quan');
+  const { profile } = useAuth();
+  const timezone = profile?.timezone || 'Asia/Ho_Chi_Minh';
   const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
   const [recent, setRecent] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [netWorth, setNetWorth] = useState<number>(0);
   const [monthIncome, setMonthIncome] = useState<number>(0);
   const [monthExpense, setMonthExpense] = useState<number>(0);
+  const [insights, setInsights] = useState<ActionableInsight[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -57,7 +70,7 @@ export function DashboardPage() {
     try {
       const [accs, txs, cats, nw] = await Promise.all([
         listAccountsWithBalances(),
-        listTransactions({ limit: 8 }),
+        listTransactions({ limit: 6 }),
         listCategories(),
         getNetWorth(),
       ]);
@@ -66,14 +79,87 @@ export function DashboardPage() {
       setCategories(cats);
       setNetWorth(nw);
 
-      const start = startOfMonth().toISOString().slice(0, 10);
-      const end = endOfMonth().toISOString().slice(0, 10);
+      const now = new Date();
+      const start = toLocalDateString(new Date(now.getFullYear(), now.getMonth(), 1));
+      const end = toLocalDateString(new Date(now.getFullYear(), now.getMonth() + 1, 0));
       const sum = await getTransactionsSummary({
         start_date: start,
         end_date: end,
+        timezone,
       });
       setMonthIncome(Number(sum?.total_income ?? 0));
       setMonthExpense(Number(sum?.total_expense ?? 0));
+
+      // Quét các việc cần chú ý (Actionable Insights - F21)
+      const collected: ActionableInsight[] = [];
+      try {
+        // 1. Quét ngân sách sắp chạm trần hoặc vượt
+        const budgets = await listBudgets();
+        const activeBudgets = budgets.filter(b => b.is_active);
+        const progressList = await Promise.all(
+          activeBudgets.slice(0, 5).map(b => getBudgetProgress(b.id, start, end).catch(() => null)),
+        );
+        for (let i = 0; i < progressList.length; i++) {
+          const p = progressList[i];
+          const b = activeBudgets[i];
+          if (p && b && p.percent >= 80) {
+            if (p.percent >= 100) {
+              collected.push({
+                id: `budget-${b.id}`,
+                type: 'danger',
+                title: `Ngân sách vượt ${Math.round(p.percent)}%`,
+                description: `"${b.name}" đã chi ${formatVND(p.spent_minor)} / ${formatVND(b.amount_minor)}.`,
+                linkText: 'Xem ngân sách',
+                linkTo: '/budgets',
+              });
+            } else {
+              collected.push({
+                id: `budget-${b.id}`,
+                type: 'warning',
+                title: `Ngân sách chạm ${Math.round(p.percent)}%`,
+                description: `"${b.name}" sắp chạm trần chi tiêu tháng.`,
+                linkText: 'Xem ngân sách',
+                linkTo: '/budgets',
+              });
+            }
+          }
+        }
+
+        // 2. Quét giao dịch định kỳ đến hạn
+        const rules = await listRecurring();
+        const todayStr = toLocalDateString(now);
+        const dueRules = rules.filter(
+          r => r.status === 'active' && r.next_occurrence && r.next_occurrence <= todayStr,
+        );
+        if (dueRules.length > 0) {
+          collected.push({
+            id: 'recurring-due',
+            type: 'warning',
+            title: `${dueRules.length} khoản định kỳ đến hạn`,
+            description: `Có chi phí hoặc thu nhập định kỳ cần được ghi nhận vào sổ.`,
+            linkText: 'Ghi nhận ngay',
+            linkTo: '/recurring',
+          });
+        }
+
+        // 3. Quét giao dịch chưa phân loại
+        const uncategorized = txs.filter(
+          t => !t.category_id && t.type !== 'transfer' && t.status !== 'voided',
+        );
+        if (uncategorized.length > 0) {
+          collected.push({
+            id: 'uncategorized',
+            type: 'info',
+            title: `${uncategorized.length} giao dịch chưa phân loại`,
+            description: `Giao dịch gần đây chưa có danh mục, ảnh hưởng tới biểu đồ phân tích.`,
+            linkText: 'Phân loại ngay',
+            linkTo: '/transactions',
+          });
+        }
+      } catch {
+        // Tránh gián đoạn dashboard nếu sub-query lỗi
+      }
+      setInsights(collected.slice(0, 3));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -117,13 +203,37 @@ export function DashboardPage() {
             {loading ? <Spinner size="sm" /> : null}
             {loading ? 'Đang tải…' : 'Làm mới'}
           </button>
-          <Link to="/transactions" className="btn-primary inline-flex items-center gap-1.5">
+          <Link to="/transactions?action=new" className="btn-primary inline-flex items-center gap-1.5">
             <Plus size={16} strokeWidth={2.25} /> Giao dịch mới
           </Link>
         </div>
       </header>
 
       {err && <ErrorState message={err} onRetry={load} />}
+
+      {!loading && accounts.length === 0 && (
+        <div className="rounded-2xl border border-brand-200 bg-gradient-to-r from-brand-50/80 via-surface to-brand-50/40 p-6 dark:border-brand-800 dark:from-brand-950/40 dark:via-surface-dark dark:to-brand-900/20 shadow-card">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400">
+                <WalletIcon size={16} /> Bắt đầu với Quản lý thu chi
+              </div>
+              <h2 className="text-xl font-bold text-ink-900 dark:text-inkDark-900">
+                Chào mừng bạn! Hãy thiết lập tài khoản đầu tiên
+              </h2>
+              <p className="text-sm text-ink-600 dark:text-inkDark-400 max-w-xl">
+                Để theo dõi dòng tiền chính xác, bạn cần tạo ít nhất một ví hoặc tài khoản ngân hàng (ví dụ: Tiền mặt, Vietcombank, Momo...).
+              </p>
+            </div>
+            <Link
+              to="/accounts"
+              className="btn-primary shrink-0 inline-flex items-center gap-2 shadow-pop"
+            >
+              <Plus size={16} strokeWidth={2.25} /> Thiết lập tài khoản ngay
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -150,9 +260,54 @@ export function DashboardPage() {
           accent="err"
           loading={loading}
           icon={TrendingDown}
-          subtitle={`Còn lại: ${formatVND(monthNet)}`}
+          subtitle={`Chênh lệch thu–chi: ${monthNet >= 0 ? '+' : ''}${formatVND(monthNet)}`}
         />
       </div>
+
+      {/* Cần chú ý (Actionable Insights - F21) */}
+      {!loading && insights.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-600 dark:text-inkDark-400 flex items-center gap-2">
+              <AlertCircle size={15} className="text-brand-500" />
+              Cần chú ý ({insights.length})
+            </h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {insights.map(item => (
+              <div
+                key={item.id}
+                className={clsx(
+                  'card flex flex-col justify-between p-4 border-l-4 transition hover:shadow-pop',
+                  item.type === 'danger' && 'border-l-err-500 bg-err-50/20 dark:bg-err-950/10',
+                  item.type === 'warning' && 'border-l-warning-500 bg-warning-50/20 dark:bg-warning-950/10',
+                  item.type === 'info' && 'border-l-info-500 bg-info-50/20 dark:bg-info-950/10',
+                )}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-ink-900 dark:text-inkDark-900">
+                    {item.type === 'danger' && <AlertTriangle size={14} className="text-err-500 shrink-0" />}
+                    {item.type === 'warning' && <AlertCircle size={14} className="text-warning-500 shrink-0" />}
+                    {item.type === 'info' && <Tag size={14} className="text-info-500 shrink-0" />}
+                    <span>{item.title}</span>
+                  </div>
+                  <p className="text-xs text-ink-600 dark:text-inkDark-400">
+                    {item.description}
+                  </p>
+                </div>
+                <div className="pt-3 mt-1 border-t border-ink-100 dark:border-inkDark-200 flex justify-end">
+                  <Link
+                    to={item.linkTo}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                  >
+                    {item.linkText} <ArrowUpRight size={12} strokeWidth={2} />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Accounts + Recent */}
       <section className="grid gap-4 lg:grid-cols-3">
@@ -226,7 +381,7 @@ export function DashboardPage() {
                 Giao dịch gần đây
               </h2>
               <p className="text-2xs uppercase tracking-[0.16em] text-ink-400 dark:text-inkDark-400">
-                8 mục mới nhất
+                {recent.length > 0 ? `${Math.min(recent.length, 6)} mục mới nhất` : '6 mục mới nhất'}
               </p>
             </div>
             <Link

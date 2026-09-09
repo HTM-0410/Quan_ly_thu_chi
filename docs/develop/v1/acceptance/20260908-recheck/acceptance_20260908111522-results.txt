@@ -1,0 +1,663 @@
+CHECK minimal-auth-bootstrap exit=0
+CREATE SCHEMA
+CREATE EXTENSION
+CREATE TABLE
+CREATE FUNCTION
+GRANT
+GRANT
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+CHECK 20260730000001_m1_core_tables.sql exit=0
+BEGIN
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE TRIGGER
+COMMIT
+CHECK 20260730000002_m1_rls_policies.sql exit=0
+BEGIN
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+COMMIT
+CHECK 20260730000003_m1_rpc_functions.sql exit=0
+BEGIN
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260730000004_m1_audit_logs.sql exit=0
+BEGIN
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+COMMIT
+CHECK 20260801000001_m3_budgets_goals_recurring.sql exit=0
+BEGIN
+CREATE TYPE
+CREATE TYPE
+CREATE TYPE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TRIGGER
+CREATE TRIGGER
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260802000001_m4_audit_hardening.sql exit=0
+BEGIN
+ALTER TABLE
+DROP POLICY
+psql:<stdin>:20: NOTICE:  policy "Users can update own budget categories" for relation "budget_categories" does not exist, skipping
+CREATE POLICY
+psql:<stdin>:45: NOTICE:  trigger "validate_transfer_balance_trg" for relation "transaction_entries" does not exist, skipping
+DROP TRIGGER
+CREATE TRIGGER
+CREATE FUNCTION
+COMMIT
+CHECK 20260802000002_m4_perf_rpcs.sql exit=0
+BEGIN
+CREATE FUNCTION
+REVOKE
+GRANT
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMIT
+CHECK 20260802000003_fix_client_generated_id_indexes.sql exit=0
+BEGIN
+DROP INDEX
+CREATE INDEX
+DROP INDEX
+CREATE INDEX
+DROP INDEX
+CREATE INDEX
+DROP INDEX
+CREATE INDEX
+COMMIT
+CHECK 20260802000005_m5_edit_and_adjust_balance.sql exit=0
+BEGIN
+CREATE FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260803000001_m5_reports_tz_fix.sql exit=0
+BEGIN
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMIT
+CHECK 20260803000002_m6_debts.sql exit=0
+BEGIN
+CREATE TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE INDEX
+CREATE FUNCTION
+DROP TRIGGER
+psql:<stdin>:115: NOTICE:  trigger "on_debt_payment" for relation "public.debt_payments" does not exist, skipping
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260803000003_m7_fix_create_debt_counterparty.sql exit=0
+BEGIN
+CREATE FUNCTION
+COMMIT
+CHECK 20260803000004_m8_fix_debts_rls.sql exit=0
+BEGIN
+DROP POLICY
+psql:<stdin>:13: NOTICE:  policy "Users can CRUD own debt payments" for relation "public.debt_payments" does not exist, skipping
+DROP POLICY
+psql:<stdin>:15: NOTICE:  policy "Users can manage own debt payments" for relation "public.debt_payments" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+DROP POLICY
+psql:<stdin>:34: NOTICE:  policy "Users can CRUD own debts" for relation "public.debts" does not exist, skipping
+DROP POLICY
+CREATE POLICY
+DROP POLICY
+CREATE POLICY
+COMMIT
+CHECK 20260803000005_m9_fix_add_debt_payment.sql exit=0
+BEGIN
+CREATE FUNCTION
+COMMIT
+CHECK 20260803000006_seed_demo_user.sql exit=0
+BEGIN
+ALTER TABLE
+psql:<stdin>:8: NOTICE:  column "counterparty_name" of relation "debts" already exists, skipping
+ALTER TABLE
+psql:<stdin>:9: NOTICE:  column "counterparty_phone" of relation "debts" already exists, skipping
+ALTER TABLE
+psql:<stdin>:10: NOTICE:  column "user_id" of relation "debt_payments" already exists, skipping
+ALTER TABLE
+psql:<stdin>:11: NOTICE:  column "payment_type" of relation "debt_payments" already exists, skipping
+psql:<stdin>:12: NOTICE:  column "notes" of relation "debt_payments" already exists, skipping
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+INSERT 0 1
+psql:<stdin>:301: NOTICE:  Seed data thanh cong cho user demo@finly.vn
+DO
+COMMIT
+CHECK 20260803000007_m10_fix_debt_remaining.sql exit=0
+BEGIN
+DROP TRIGGER
+psql:<stdin>:16: NOTICE:  trigger "trg_update_remaining_amount" for relation "public.debt_payments" does not exist, skipping
+DROP TRIGGER
+psql:<stdin>:17: NOTICE:  trigger "trigger_update_debt_remaining" for relation "public.debt_payments" does not exist, skipping
+DROP FUNCTION
+psql:<stdin>:20: NOTICE:  function public.fn_update_remaining_after_payment() does not exist, skipping
+DROP FUNCTION
+psql:<stdin>:21: NOTICE:  function public.update_debt_remaining_amount() does not exist, skipping
+CREATE FUNCTION
+CREATE TRIGGER
+DO
+UPDATE 0
+ALTER TABLE
+UPDATE 0
+ALTER TABLE
+COMMIT
+CHECK 20260803000008_m11_fix_debt_summary.sql exit=0
+BEGIN
+CREATE FUNCTION
+COMMIT
+CHECK 20260809000001_m12_bills.sql exit=0
+BEGIN
+CREATE TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+ALTER TABLE
+CREATE POLICY
+CREATE INDEX
+CREATE INDEX
+DROP TRIGGER
+psql:<stdin>:89: NOTICE:  trigger "update_bills_updated_at" for relation "public.bills" does not exist, skipping
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260809000002_m13_category_parent_tree.sql exit=0
+BEGIN
+CREATE INDEX
+psql:<stdin>:15: NOTICE:  relation "idx_categories_parent_id" already exists, skipping
+ALTER TABLE
+CREATE INDEX
+CREATE FUNCTION
+DROP TRIGGER
+psql:<stdin>:47: NOTICE:  trigger "trg_categories_prevent_circular_parent" for relation "categories" does not exist, skipping
+CREATE TRIGGER
+DO
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE VIEW
+COMMIT
+CHECK 20260810000001_m14_global_categories_and_rpcs_baseline.sql exit=0
+BEGIN
+CREATE TABLE
+ALTER TABLE
+DO
+CREATE INDEX
+CREATE INDEX
+DO
+DO
+DROP FUNCTION
+psql:<stdin>:72: NOTICE:  function public.mark_debt_paid(uuid) does not exist, skipping
+DROP FUNCTION
+psql:<stdin>:73: NOTICE:  function public.mark_debt_paid() does not exist, skipping
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000002_global_category_parent_tree.sql exit=0
+BEGIN
+ALTER TABLE
+psql:<stdin>:15: NOTICE:  column "parent_id" of relation "global_categories" already exists, skipping
+CREATE INDEX
+psql:<stdin>:16: NOTICE:  relation "idx_global_categories_parent_id" already exists, skipping
+ALTER TABLE
+psql:<stdin>:18: NOTICE:  constraint "global_categories_name_kind_key" of relation "global_categories" does not exist, skipping
+CREATE INDEX
+CREATE INDEX
+DO
+COMMIT
+CHECK 20260810000003_update_get_category_usage_counts_global.sql exit=0
+BEGIN
+DROP FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000004_fix_net_worth_and_tz_summary.sql exit=0
+BEGIN
+DROP FUNCTION
+CREATE FUNCTION
+DROP FUNCTION
+DROP FUNCTION
+psql:<stdin>:36: NOTICE:  function public.get_transactions_summary(date,date,uuid,uuid,text) does not exist, skipping
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000005_tx_pagination_indexes.sql exit=0
+BEGIN
+CREATE INDEX
+CREATE INDEX
+COMMIT
+CHECK 20260810000006_settle_debt_payment_rpc.sql exit=0
+BEGIN
+DROP FUNCTION
+psql:<stdin>:8: NOTICE:  function public.settle_debt_payment(uuid,uuid,pg_catalog.int8,timestamptz,text,uuid) does not exist, skipping
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000007_budget_tree_and_lifecycle.sql exit=0
+BEGIN
+DROP FUNCTION
+DROP FUNCTION
+psql:<stdin>:10: NOTICE:  function get_budget_progress(uuid,timestamptz,timestamptz) does not exist, skipping
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000008_category_expenses_breakdown_rpc.sql exit=0
+BEGIN
+DROP FUNCTION
+psql:<stdin>:9: NOTICE:  function public.get_category_expenses_breakdown(date,date,text) does not exist, skipping
+DROP FUNCTION
+psql:<stdin>:10: NOTICE:  function get_category_expenses_breakdown(date,date,text) does not exist, skipping
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000009_recurring_scheduler_and_idempotency.sql exit=0
+BEGIN
+ALTER TABLE
+DROP FUNCTION
+DROP FUNCTION
+psql:<stdin>:12: NOTICE:  function materialize_recurring_rules(timestamptz,pg_catalog.int4) does not exist, skipping
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000010_goal_contribution_withdrawal_and_lifecycle.sql exit=0
+BEGIN
+DROP FUNCTION
+psql:<stdin>:9: NOTICE:  function public.add_goal_contribution(uuid,pg_catalog.int8,timestamptz,text,uuid) does not exist, skipping
+DROP FUNCTION
+DROP FUNCTION
+psql:<stdin>:11: NOTICE:  function add_goal_contribution(uuid,pg_catalog.int8,timestamptz,text,uuid) does not exist, skipping
+psql:<stdin>:12: NOTICE:  function add_goal_contribution(uuid,pg_catalog.int8,timestamptz,text,uuid,pg_catalog.bool,jsonb) does not exist, skipping
+DROP FUNCTION
+CREATE FUNCTION
+COMMIT
+CHECK 20260810000011_account_archive_and_balance_check.sql exit=0
+BEGIN
+DROP FUNCTION
+psql:<stdin>:10: NOTICE:  function public.list_accounts_with_balances(uuid,pg_catalog.bool) does not exist, skipping
+DROP FUNCTION
+psql:<stdin>:11: NOTICE:  function list_accounts_with_balances(uuid) does not exist, skipping
+DROP FUNCTION
+psql:<stdin>:12: NOTICE:  function list_accounts_with_balances(uuid,pg_catalog.bool) does not exist, skipping
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMIT
+CHECK 20260907000001_source_schema_compatibility.sql exit=0
+BEGIN
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+UPDATE 0
+COMMIT
+CHECK 20260907000002_debt_audit_log_compatibility.sql exit=0
+BEGIN
+CREATE TABLE
+ALTER TABLE
+COMMIT
+CHECK 20260907000003_acceptance_hardening.sql exit=0
+BEGIN
+DROP FUNCTION
+psql:<stdin>:9: NOTICE:  function public.create_manual_transaction(uuid,transaction_type,uuid,pg_catalog.int8,pg_catalog.bpchar,timestamptz,uuid,uuid,text,text,transaction_source) does not exist, skipping
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+CREATE FUNCTION
+CREATE FUNCTION
+DROP FUNCTION
+psql:<stdin>:180: NOTICE:  function public.list_accounts_with_balances(uuid) does not exist, skipping
+CREATE FUNCTION
+REVOKE
+GRANT
+REVOKE
+GRANT
+REVOKE
+GRANT
+ALTER FUNCTION
+ALTER FUNCTION
+REVOKE
+GRANT
+REVOKE
+GRANT
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+DROP FUNCTION
+psql:<stdin>:285: NOTICE:  function public.get_transactions_summary(date,date,uuid) does not exist, skipping
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+CREATE FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+REVOKE
+GRANT
+ALTER FUNCTION
+REVOKE
+GRANT
+DROP TRIGGER
+psql:<stdin>:482: NOTICE:  trigger "trg_update_remaining_amount" for relation "public.debt_payments" does not exist, skipping
+DROP TRIGGER
+DROP TRIGGER
+psql:<stdin>:483: NOTICE:  trigger "trigger_update_debt_remaining" for relation "public.debt_payments" does not exist, skipping
+DROP TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+REVOKE
+GRANT
+REVOKE
+GRANT
+REVOKE
+GRANT
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMIT
+CHECK 20260908000001_financial_operations.sql exit=0
+BEGIN
+CREATE TABLE
+CREATE INDEX
+ALTER TABLE
+REVOKE
+GRANT
+DROP FUNCTION
+psql:<stdin>:28: NOTICE:  function public.create_paying_for_operation(uuid,uuid,pg_catalog.int8,pg_catalog.int8,uuid,timestamptz,uuid,uuid,text,text,text) does not exist, skipping
+CREATE FUNCTION
+REVOKE
+GRANT
+CREATE FUNCTION
+REVOKE
+GRANT
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMIT
+CHECK 20260908000002_ocr_row_atomic.sql exit=0
+BEGIN
+ALTER TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+ALTER TABLE
+REVOKE
+psql:<stdin>:32: NOTICE:  function public.create_ocr_transaction_row_atomic(uuid,jsonb,jsonb,jsonb) does not exist, skipping
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMIT
+CHECK 20260908000003_principal_reporting.sql exit=0
+BEGIN
+CREATE FUNCTION
+REVOKE
+GRANT
+DROP FUNCTION
+psql:<stdin>:64: NOTICE:  function public.get_transactions_summary(date,date,uuid) does not exist, skipping
+DROP FUNCTION
+CREATE FUNCTION
+REVOKE
+GRANT
+COMMIT
+CHECK 20260908000004_recurring_end_lifecycle.sql exit=0
+BEGIN
+CREATE FUNCTION
+COMMIT
+CHECK accounting-fixture exit=0
+BEGIN
+SET
+INSERT 0 2
+INSERT 0 2
+SET
+              set_config              
+--------------------------------------
+ aaaaaaaa-0000-4000-8000-000000000001
+(1 row)
+
+DO
+psql:<stdin>:41: NOTICE:  PASS: ownership, posted-only, retry, payload conflict, principal exclusion
+RESET
+SET
+ set_config 
+------------
+ 
+(1 row)
+
+DO
+psql:<stdin>:52: NOTICE:  PASS: anonymous balance RPC denied
+ROLLBACK
+CHECK recurring-fixture exit=0
+BEGIN
+SET
+INSERT 0 1
+INSERT 0 1
+SET
+              set_config              
+--------------------------------------
+ aaaaaaaa-0000-4000-8000-000000000001
+(1 row)
+
+INSERT 0 1
+DO
+psql:<stdin>:32: NOTICE:  PASS: day31 clamping, pending balance, duplicate materialization/confirm/skip, ended
+ROLLBACK
+CHECK financial-fixture exit=0
+BEGIN
+INSERT 0 1
+INSERT 0 1
+SET
+              set_config              
+--------------------------------------
+ aaaaaaaa-0000-4000-8000-000000000001
+(1 row)
+
+DO
+psql:<stdin>:24: NOTICE:  PASS: paying-for retry, payload mismatch, overpayment rollback, balance and consumption
+ROLLBACK
+CHECK ocr-atomic-fixture exit=0
+BEGIN
+SET
+INSERT 0 2
+INSERT 0 2
+INSERT 0 1
+SET
+              set_config              
+--------------------------------------
+ aaaaaaaa-9000-4000-8000-000000000001
+(1 row)
+
+psql:<stdin>:150: NOTICE:  PASS: OCR row atomicity, global category mapping, new-person rollback, bill consistency, and idempotent retry
+DO
+RESET
+ROLLBACK

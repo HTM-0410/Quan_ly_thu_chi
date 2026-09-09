@@ -10,11 +10,21 @@ let signedIn = false;
 const createdPersonIds = new Set<string>();
 const createdDebtIds = new Set<string>();
 
+export const IS_REMOTE_TEST_ENABLED = process.env.RUN_REMOTE_TESTS === 'true';
+
 /**
  * Sign in as the demo user. Idempotent within the test session.
  * Throws on failure so the test fails loudly.
+ * CHẶN MẶC ĐỊNH: Chỉ chạy khi có biến môi trường RUN_REMOTE_TESTS=true để bảo vệ DB demo.
  */
 export async function signInTestUser(): Promise<void> {
+  if (!IS_REMOTE_TEST_ENABLED) {
+    throw new Error(
+      '[helpers] BẢO VỆ MÔI TRƯỜNG: Chặn kết nối Supabase demo từ xa trong test mặc định. ' +
+        'Để chạy integration test từ xa (khi được cấp quyền), hãy chạy với RUN_REMOTE_TESTS=true.',
+    );
+  }
+
   if (signedIn) {
     const { data } = await supabase.auth.getSession();
     if (data.session?.user?.email === TEST_EMAIL) return;

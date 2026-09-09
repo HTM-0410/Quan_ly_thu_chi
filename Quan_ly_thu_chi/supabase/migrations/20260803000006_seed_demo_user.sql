@@ -1,6 +1,17 @@
 -- ================================================================
 -- SEED: Dữ liệu demo cho tài khoản demo@finly.vn / Demo123456!
 -- Chạy trong Supabase SQL Editor (toàn bộ file này)
+
+-- Compatibility for the historical debt migration sequence. These columns are
+-- finalized in m10 after the seed has populated them.
+ALTER TABLE public.debts ADD COLUMN IF NOT EXISTS counterparty_name TEXT;
+ALTER TABLE public.debts ADD COLUMN IF NOT EXISTS counterparty_phone TEXT;
+ALTER TABLE public.debt_payments ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.debt_payments ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT 'payment';
+ALTER TABLE public.debt_payments ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES public.categories(id) ON DELETE SET NULL;
+ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS currency CHAR(3) NOT NULL DEFAULT 'VND';
+ALTER TABLE public.recurring_rules ALTER COLUMN next_occurrence SET DEFAULT NOW();
 -- Idempotent: chạy lại nhiều lần đều an toàn
 -- ================================================================
 

@@ -64,6 +64,10 @@ export interface PreviewRow {
   sanity_warning?: string | null;
   /** Lỗi nghiêm trọng (vd amount = 0) — UI tô đỏ + bỏ chọn. */
   sanity_error?: string | null;
+  /** Lỗi khi lưu giao dịch vào DB (F12) — hiển thị để sửa và thử lại. */
+  import_error?: string | null;
+  /** Idempotency key ổn định khi retry. */
+  client_generated_id?: string;
   /**
    * Tài khoản mặc định (single-account mode hoặc khi splits rỗng).
    * Giữ lại cho backward compat khi rows cũ không có splits.
@@ -374,29 +378,29 @@ export function ReceiptPreviewTable({
         </div>
       </div>
 
-      {rows.some(r => r.sanity_error || r.sanity_warning) && (
+      {rows.some(r => r.sanity_error || r.sanity_warning || r.import_error) && (
         <ul className="space-y-1.5 rounded-card border border-warn-200 bg-warn-50/60 p-2.5 text-2xs dark:border-warn-500/30 dark:bg-warn-500/10">
           {rows
-            .filter(r => r.sanity_error || r.sanity_warning)
+            .filter(r => r.sanity_error || r.sanity_warning || r.import_error)
             .map(r => (
               <li
                 key={r.id}
                 className={clsx(
                   'flex items-start gap-1.5',
-                  r.sanity_error ? 'text-err-700 dark:text-err-500' : 'text-warn-700 dark:text-warn-400',
+                  (r.import_error || r.sanity_error) ? 'text-err-700 dark:text-err-500' : 'text-warn-700 dark:text-warn-400',
                 )}
               >
                 <AlertTriangle size={11} strokeWidth={2} className="mt-0.5 shrink-0" />
                 <span className="flex-1">
                   <strong>{r.payee || r.suggested_category || 'GD'}</strong> ({Math.round(r.amount_minor / 100).toLocaleString('vi-VN')}₫):{' '}
-                  {r.sanity_error ?? r.sanity_warning}
+                  {r.import_error ? `Lỗi lưu: ${r.import_error}` : (r.sanity_error ?? r.sanity_warning)}
                 </span>
               </li>
             ))}
         </ul>
       )}
 
-      <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+      <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1 pb-10">
         {rows.map(r => {
           const valid = isRowValid(r);
           const lowConf = r.confidence < 0.6;
@@ -412,9 +416,9 @@ export function ReceiptPreviewTable({
                 'rounded-card border bg-surface px-3 py-2.5 transition-colors dark:bg-surface-dark',
                 'border-ink-200 dark:border-ink-700',
                 !r.selected && 'opacity-50',
-                r.sanity_error && r.selected && 'border-err-300 bg-err-50/60 dark:border-err-700/50 dark:bg-err-700/15',
-                !r.sanity_error && r.sanity_warning && r.selected && 'border-warn-300 bg-warn-50/50 dark:border-warn-500/40 dark:bg-warn-500/10',
-                !valid && r.selected && !r.sanity_error && 'border-err-300 bg-err-50/30 dark:border-err-700/40 dark:bg-err-700/10',
+                (r.sanity_error || r.import_error) && r.selected && 'border-err-300 bg-err-50/60 dark:border-err-700/50 dark:bg-err-700/15',
+                !r.sanity_error && !r.import_error && r.sanity_warning && r.selected && 'border-warn-300 bg-warn-50/50 dark:border-warn-500/40 dark:bg-warn-500/10',
+                !valid && r.selected && !r.sanity_error && !r.import_error && 'border-err-300 bg-err-50/30 dark:border-err-700/40 dark:bg-err-700/10',
               )}
             >
               {/* Hàng 1: Checkbox | Loại + Số tiền (nổi bật) | Conf badge */}
@@ -664,6 +668,7 @@ export function ReceiptPreviewTable({
                     label="Danh mục"
                     placeholder="--"
                     clearable
+                    compact
                   />
                 </div>
 
@@ -774,6 +779,14 @@ export function ReceiptPreviewTable({
                   bill={r.bill ?? null}
                   onChange={patch => updateBill(r.id, patch)}
                 />
+              )}
+
+              {/* Thông báo lỗi lưu trực tiếp trên dòng (F12) */}
+              {r.import_error && (
+                <div className="mt-2 flex items-center gap-1.5 rounded bg-err-50 px-2.5 py-1.5 text-2xs font-medium text-err-700 dark:bg-err-950/40 dark:text-err-300">
+                  <AlertTriangle size={12} className="shrink-0 text-err-500" />
+                  <span>Lỗi lưu: {r.import_error}. Vui lòng sửa thông tin và bấm &quot;Thử lại&quot;.</span>
+                </div>
               )}
             </div>
           );

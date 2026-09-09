@@ -8,3 +8,14 @@ binding = "ASSETS"
 
 [vars]
 SPA_FALLBACK = "index.html"
+
+# One named, SQLite-backed object per authenticated user. The Worker fails
+# closed when this binding is absent, so local Pages previews must use the
+# Wrangler config (or an explicit test double) instead of an isolate-local map.
+[[durable_objects.bindings]]
+name = "OCR_QUOTA"
+class_name = "OcrQuotaDurableObject"
+
+[[migrations]]
+tag = "ocr-quota-v1"
+new_sqlite_classes = ["OcrQuotaDurableObject"]

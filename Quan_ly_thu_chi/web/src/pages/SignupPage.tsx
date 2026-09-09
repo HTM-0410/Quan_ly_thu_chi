@@ -5,8 +5,6 @@ import { useAuth } from '../lib/auth';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { Logo } from '../components/Logo';
 
-const REDIRECT_DELAY_MS = 4000;
-
 function validatePassword(pw: string): string | null {
   if (pw.length < 8) return 'Mật khẩu phải có ít nhất 8 ký tự.';
   if (!/[A-Za-z]/.test(pw)) return 'Mật khẩu phải có ít nhất 1 chữ cái.';
@@ -16,7 +14,7 @@ function validatePassword(pw: string): string | null {
 
 export function SignupPage() {
   useDocumentTitle('Đăng ký');
-  const { session, signUp } = useAuth();
+  const { session, signUp, resendConfirmation } = useAuth();
   const nav = useNavigate();
   const loc = useLocation() as { state?: { from?: Location } };
 
@@ -27,18 +25,9 @@ export function SignupPage() {
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [successEmail, setSuccessEmail] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState<number>(REDIRECT_DELAY_MS / 1000);
+  const [resending, setResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!successEmail) return;
-    if (countdown <= 0) {
-      nav('/login', { replace: true, state: { justSignedUpEmail: successEmail } });
-      return;
-    }
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [successEmail, countdown, nav]);
 
   if (session) {
     const target = (loc.state?.from as unknown as { pathname?: string })?.pathname ?? '/dashboard';
@@ -50,11 +39,23 @@ export function SignupPage() {
     nav('/login', { replace: true, state: { justSignedUpEmail: successEmail } });
   }
 
+  async function handleResend() {
+    if (!successEmail) return;
+    setResending(true);
+    setResendMessage(null);
+    const { error } = await resendConfirmation(successEmail);
+    setResending(false);
+    if (error) {
+      setResendMessage(`Lỗi: ${error}`);
+    } else {
+      setResendMessage('Đã gửi lại email xác nhận thành công. Vui lòng kiểm tra hộp thư!');
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setErr(null);
     setSuccessEmail(null);
-    setCountdown(REDIRECT_DELAY_MS / 1000);
 
     const name = fullName.trim();
     const mail = email.trim();
@@ -207,27 +208,40 @@ export function SignupPage() {
               <div
                 role="status"
                 aria-live="polite"
-                className="space-y-3 rounded-card border border-ok-100 bg-ok-50 px-4 py-3 text-sm text-ok-700 dark:border-ok-700/40 dark:bg-ok-700/15 dark:text-ok-500"
+                className="space-y-3 rounded-card border border-ok-100 bg-ok-50 p-4 text-sm text-ok-700 dark:border-ok-700/40 dark:bg-ok-700/15 dark:text-ok-500"
               >
-                <div className="flex items-center gap-2 font-semibold">
-                  <CheckCircle2 size={16} /> Đăng ký thành công!
+                <div className="flex items-center gap-2 font-semibold text-base">
+                  <CheckCircle2 size={18} className="text-ok-600" /> Đăng ký thành công!
                 </div>
                 <p>
                   Chúng tôi đã gửi email xác nhận đến{' '}
-                  <span className="font-semibold">{successEmail}</span>. Vui lòng kiểm tra hộp thư
+                  <span className="font-semibold text-ink-900 dark:text-inkDark-900">{successEmail}</span>. Vui lòng kiểm tra hộp thư
                   (kể cả thư mục spam) và click link xác nhận để kích hoạt tài khoản.
                 </p>
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <span className="text-xs">
-                    Tự chuyển sang trang đăng nhập sau{' '}
-                    <span className="font-semibold tabular-nums">{countdown}s</span>…
-                  </span>
+
+                {resendMessage && (
+                  <div className={`p-2.5 rounded text-xs font-medium ${
+                    resendMessage.startsWith('Lỗi') ? 'bg-err-50 text-err-700 border border-err-200' : 'bg-brand-50 text-brand-700 border border-brand-200'
+                  }`}>
+                    {resendMessage}
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-ok-200/50">
+                  <button
+                    type="button"
+                    onClick={handleResend}
+                    disabled={resending}
+                    className="btn-secondary !text-xs !py-1.5"
+                  >
+                    {resending ? 'Đang gửi lại…' : 'Gửi lại email xác nhận'}
+                  </button>
                   <button
                     type="button"
                     onClick={goToLoginNow}
-                    className="btn-primary !px-3 !py-1 !text-xs"
+                    className="btn-primary !text-xs !py-1.5"
                   >
-                    Đi ngay
+                    Đến trang Đăng nhập
                   </button>
                 </div>
               </div>

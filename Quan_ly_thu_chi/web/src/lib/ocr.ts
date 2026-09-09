@@ -1,14 +1,12 @@
 // =============================================================
-// OCR client — gọi Gemini REST API trực tiếp từ browser.
-// Không qua proxy/server. API key được bundle vào JS (trade-off đã chấp nhận).
+// OCR client — browser chỉ gọi same-origin Worker proxy.
+// Không giữ provider secret, không gọi provider trực tiếp.
 // =============================================================
 
 import {
-  GEMINI_API_KEY,
-  OCR_MODEL,
-  IS_PROD,
   MissingOcrConfigError,
 } from './config';
+import { supabase } from './supabase';
 import { OCR_SYSTEM_PROMPT } from './ocrPrompt';
 import {
   GEMINI_RESPONSE_SCHEMA,
@@ -22,15 +20,13 @@ import {
 
 export { sanityCheckTransaction } from './ocrSchema';
 
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
-
-/** HTTP error do Gemini trả — UI có thể dùng status để retry/backoff. */
+/** HTTP error do OCR proxy trả — UI có thể dùng status để retry/backoff. */
 export class OcrHttpError extends Error {
   constructor(
     public readonly status: number,
     public readonly bodyText: string,
   ) {
-    super(`Gemini API ${status}: ${truncate(bodyText, 200)}`);
+    super(`OCR proxy ${status}: ${truncate(bodyText, 200)}`);
     this.name = 'OcrHttpError';
   }
 }
@@ -40,55 +36,68 @@ async function callGeminiWithRetry(args: {
   url: string;
   body: unknown;
   maxRetries: number;
+  signal?: AbortSignal;
 }): Promise<unknown> {
   let lastErr: unknown = null;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    throw new MissingOcrConfigError('Bạn cần đăng nhập trước khi dùng OCR.');
+  }
 
   for (let attempt = 0; attempt <= args.maxRetries; attempt++) {
+    if (args.signal?.aborted) {
+      throw new DOMException('Thao tác OCR đã bị huỷ.', 'AbortError');
+    }
+
     let res: Response;
+    const t0 = Date.now();
     try {
+      // eslint-disable-next-line no-console
+      console.log(`[ocr] Gửi request tới ${args.url} (lần ${attempt + 1}/${args.maxRetries + 1})...`);
       res = await fetch(args.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify(args.body),
+        signal: args.signal,
       });
-    } catch (networkErr) {
+      // eslint-disable-next-line no-console
+      console.log(`[ocr] Phản hồi từ ${args.url}: status ${res.status} sau ${Date.now() - t0}ms`);
+    } catch (networkErr: any) {
+      if (networkErr?.name === 'AbortError' || args.signal?.aborted) {
+        throw networkErr;
+      }
       lastErr = networkErr;
+      // eslint-disable-next-line no-console
+      console.warn(`[ocr] Lỗi kết nối tới ${args.url}:`, networkErr);
       // Network failures → retry với backoff
-      if (attempt < args.maxRetries) {
+      if (attempt < args.maxRetries && !args.signal?.aborted) {
         await sleep(500 * 2 ** attempt);
         continue;
       }
       throw new OcrParseError(
-        'Không kết nối được Gemini (mất mạng hoặc bị chặn CORS). Thử lại sau.',
+        'Không kết nối được OCR proxy. Thử lại sau.',
         networkErr,
       );
     }
 
     if (res.ok) {
-      if (!IS_PROD) {
-        // eslint-disable-next-line no-console
-        console.log(`[ocr] ✅ Gemini OK (model=${OCR_MODEL}, attempt=${attempt + 1})`);
-      }
       return await res.json();
     }
 
     const text = await safeText(res);
-
-    if (!IS_PROD) {
-      // eslint-disable-next-line no-console
-      console.error(`[ocr] ❌ Gemini HTTP ${res.status}: ${truncate(text, 500)}`);
-    }
+    // eslint-disable-next-line no-console
+    console.warn(`[ocr] Proxy trả status ${res.status}:`, text.slice(0, 200));
 
     if (res.status === 429 || res.status >= 500) {
-      if (!IS_PROD) {
-        // eslint-disable-next-line no-console
-        console.warn(`[ocr] ⚠️ HTTP ${res.status} (attempt=${attempt + 1}/${args.maxRetries + 1}): ${truncate(text, 120)}`);
-      }
       lastErr = new OcrHttpError(res.status, text);
       const retryAfterHeader = res.headers.get('Retry-After');
       const retryAfter = retryAfterHeader ? Number(retryAfterHeader) * 1000 : null;
       const wait = retryAfter ?? 1000 * 2 ** attempt;
-      if (attempt < args.maxRetries) {
+      if (attempt < args.maxRetries && !args.signal?.aborted) {
         await sleep(Math.min(wait, 10_000));
         continue;
       }
@@ -100,12 +109,13 @@ async function callGeminiWithRetry(args: {
 }
 
 /**
- * Nén ảnh xuống tối đa `maxDim` ở chiều dài nhất, encode base64 + giữ MIME gốc.
- * Dùng canvas để giảm input token khi gửi Gemini.
+ * Nén ảnh xuống tối đa `maxDim` ở chiều dài nhất, encode base64 định dạng JPEG chất lượng 0.82.
+ * Luôn phủ nền trắng để tránh ảnh PNG trong suốt bị đen khi chuyển sang JPEG.
+ * Giảm input token và payload chuyển mạng xuống 10-20 lần (~100-150KB), giúp AI phản hồi cực nhanh.
  */
 async function fileToCompressedBase64(
   file: File,
-  maxDim = 1600,
+  maxDim = 1200,
 ): Promise<{ base64: string; mime: string }> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -118,11 +128,11 @@ async function fileToCompressedBase64(
   if (!/^image\/(jpeg|png|webp|gif)$/i.test(mime)) {
     throw new OcrParseError(`Định dạng ảnh không hỗ trợ: ${mime}. Dùng JPEG/PNG/WebP.`);
   }
-  if (file.size > 8 * 1024 * 1024) {
-    throw new OcrParseError('Ảnh quá lớn (>8MB). Vui lòng nén hoặc chọn ảnh khác.');
+  if (file.size > 15 * 1024 * 1024) {
+    throw new OcrParseError('Ảnh quá lớn (>15MB). Vui lòng nén hoặc chọn ảnh khác.');
   }
 
-  // Resize qua canvas (chỉ áp dụng cho raster — đã validate MIME ở trên).
+  // Resize qua canvas
   const img = await loadImage(dataUrl);
   const { width, height } = img;
   const scale = Math.min(1, maxDim / Math.max(width, height));
@@ -134,13 +144,18 @@ async function fileToCompressedBase64(
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    // Trình duyệt không có canvas2d — fallback dùng base64 gốc.
+    // Fallback nếu không có canvas
     return { base64, mime };
   }
+
+  // Phủ nền trắng để tránh PNG nền trong suốt bị đen
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
-  // PNG giữ lossless; JPEG/WebP xuất JPEG quality 0.85 để tiết kiệm token.
-  const outMime = mime === 'image/png' ? 'image/png' : 'image/jpeg';
-  const outDataUrl = canvas.toDataURL(outMime, outMime === 'image/jpeg' ? 0.85 : undefined);
+
+  // Xuất JPEG 0.82 tối ưu cho OCR
+  const outMime = 'image/jpeg';
+  const outDataUrl = canvas.toDataURL(outMime, 0.82);
   const split = splitDataUrl(outDataUrl);
   return { base64: split.base64, mime: outMime };
 }
@@ -172,28 +187,37 @@ function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
+export type OcrProgressStage = 'compressing' | 'uploading' | 'analyzing';
+
 export interface ParseReceiptOptions {
   /** Custom categories/accounts để inject vào prompt (optional). */
   categories?: string[];
   accounts?: string[];
-  /** Override model (mặc định = OCR_MODEL từ config). */
+  /** Giữ tương thích API; model thực tế do Worker allowlist quyết định. */
   model?: string;
-  /** Số retry tối đa khi 429/5xx. Mặc định 3. */
+  /** Số retry tối đa khi 429/5xx. Mặc định 2. */
   maxRetries?: number;
+  /** Signal cho phép huỷ request ngay lập tức khi user bấm Huỷ */
+  signal?: AbortSignal;
+  /** Callback thông báo tiến độ từng giai đoạn */
+  onProgress?: (stage: OcrProgressStage) => void;
 }
 
 /**
  * Parse 1 ảnh giao dịch → trả về OcrResult đã validate.
- * Throw MissingOcrConfigError khi thiếu API key.
+ * Gemini được gọi qua /api/ocr và session được gửi bằng Bearer JWT.
  */
 export async function parseReceiptFromImage(
   file: File,
   opts: ParseReceiptOptions = {},
 ): Promise<OcrResult> {
-  if (!GEMINI_API_KEY) throw new MissingOcrConfigError();
-
+  opts.onProgress?.('compressing');
+  const t0 = Date.now();
   const { base64, mime } = await fileToCompressedBase64(file);
-  const model = opts.model ?? OCR_MODEL;
+  // eslint-disable-next-line no-console
+  console.log(
+    `[ocr] Nén ảnh "${file.name}" xong: ${(file.size / 1024).toFixed(0)}KB -> ${(base64.length / 1024).toFixed(0)}KB base64 trong ${Date.now() - t0}ms`,
+  );
 
   const requestBody = {
     contents: [
@@ -208,42 +232,25 @@ export async function parseReceiptFromImage(
       response_mime_type: 'application/json',
       response_schema: GEMINI_RESPONSE_SCHEMA,
       temperature: 0.1,
-      // TopK/TopP để mặc định cho stable output.
+      // Giới hạn output để tránh model lặp chữ số ở amount_minor
+      // cho đến khi request bị timeout. Flash Lite không nhận thinking_config.
+      max_output_tokens: 2_048,
     },
     systemInstruction: {
       parts: [{ text: OCR_SYSTEM_PROMPT }],
     },
   };
 
-  // URL override nếu user chọn model khác.
-  const customUrl =
-    model === OCR_MODEL ? null : `${GEMINI_ENDPOINT}/${model}:generateContent?key=${GEMINI_API_KEY}`;
-
+  opts.onProgress?.('uploading');
   const json = await callGeminiRaw({
-    customUrl,
+    customUrl: null,
     body: requestBody,
-    maxRetries: opts.maxRetries ?? 3,
+    maxRetries: opts.maxRetries ?? 2,
+    signal: opts.signal,
   });
 
+  opts.onProgress?.('analyzing');
   const parsed: OcrResult = unwrapGeminiJson(json) as OcrResult;
-
-  if (!IS_PROD) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[ocr] 📦 parsed JSON (model=${model}):`,
-      truncate(JSON.stringify(parsed), 1500),
-    );
-    // Debug: log từng transaction's amount để xem AI parse đúng VND × 100 chưa.
-    // eslint-disable-next-line no-console
-    console.log(
-      `[ocr] 🔍 amounts (raw vs sanity):`,
-      (parsed?.transactions ?? []).map((t: OcrTransaction) => ({
-        amount_minor: t.amount_minor,
-        type: t.type,
-        at: t.occurred_at,
-      })),
-    );
-  }
 
   const validated = validateOcrResult(parsed);
 
@@ -260,12 +267,13 @@ async function callGeminiRaw(args: {
   customUrl: string | null;
   body: unknown;
   maxRetries: number;
+  signal?: AbortSignal;
 }): Promise<unknown> {
-  const defaultUrl = `${GEMINI_ENDPOINT}/${OCR_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
   return callGeminiWithRetry({
-    url: args.customUrl ?? defaultUrl,
+    url: args.customUrl ?? '/api/ocr',
     body: args.body,
     maxRetries: args.maxRetries,
+    signal: args.signal,
   });
 }
 

@@ -10,6 +10,8 @@
 
 -- 1. Fix RLS policy for debt_payments (no user_id column exists)
 DROP POLICY IF EXISTS "Users can CRUD own debt payments" ON public.debt_payments;
+DROP POLICY IF EXISTS "Users can manage payments via their debts" ON public.debt_payments;
+DROP POLICY IF EXISTS "Users can manage own debt payments" ON public.debt_payments;
 
 CREATE POLICY "Users can manage own debt payments"
   ON public.debt_payments
@@ -29,6 +31,7 @@ CREATE POLICY "Users can manage own debt payments"
 
 -- 2. Fix RLS policy for debts (add WITH CHECK to ensure user_id is set)
 DROP POLICY IF EXISTS "Users can CRUD own debts" ON public.debts;
+DROP POLICY IF EXISTS "Users can manage own debts" ON public.debts;
 
 CREATE POLICY "Users can manage own debts"
   ON public.debts

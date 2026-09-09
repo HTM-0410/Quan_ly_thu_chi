@@ -52,7 +52,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         aria-live="polite"
         aria-atomic="true"
-        className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
+        className="fixed bottom-16 sm:bottom-4 right-4 z-[70] flex flex-col gap-2 pointer-events-none *:pointer-events-auto"
       >
         {items.map(t => (
           <ToastItem key={t.id} toast={t} onDismiss={() => setItems(prev => prev.filter(p => p.id !== t.id))} />

@@ -22,9 +22,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_global_categories_parent_null_active
 CREATE UNIQUE INDEX IF NOT EXISTS uq_global_categories_parent_not_null_active
   ON global_categories (name, kind, parent_id) WHERE parent_id IS NOT NULL AND is_active = TRUE;
 
--- Step 2: Archive CHA cũ
-UPDATE global_categories SET is_active = FALSE, updated_at = NOW()
-  WHERE parent_id IS NULL AND is_active = TRUE;
+-- Step 2: Archive CHA cũ (chỉ thực hiện nếu chưa có CON nào được nạp)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM global_categories WHERE parent_id IS NOT NULL) THEN
+    UPDATE global_categories SET is_active = FALSE, updated_at = NOW()
+      WHERE parent_id IS NULL AND is_active = TRUE;
+  END IF;
+END $$;
 
 -- Step 3: Insert CHA + CON mới (xem migration thực tế đã apply trực tiếp)
 -- Step 4: Mapping transactions (xem migration thực tế đã apply trực tiếp)

@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { Modal } from './Modal';
 import { PaymentModal } from './PaymentModal';
 import { useToast } from './Toast';
-import { getDebtWithPayments, deleteDebt, getPeople, markDebtPaid } from '../lib/api';
+import { getDebtWithPayments, deleteDebt, getPeople } from '../lib/api';
 import { formatDate, formatVND, unwrapError } from '../lib/format';
+import clsx from 'clsx';
 import type { Debt, DebtPayment, Person } from '../lib/types';
 
 interface Props {
@@ -61,6 +62,7 @@ export function DebtDetailModal({ open, onClose, onSuccess, debt }: Props) {
   const progress = debt.original_amount > 0
     ? Math.round((paid / debt.original_amount) * 100)
     : 0;
+  const hasRemaining = debt.remaining_amount > 0;
 
   return (
     <>
@@ -68,22 +70,8 @@ export function DebtDetailModal({ open, onClose, onSuccess, debt }: Props) {
         open={open && !!debt && !confirmDelete && !showPaymentModal}
         onClose={onClose}
         title={debt.type === 'lend' ? 'Khoản cho vay' : 'Khoản vay'}
-        primaryLabel={debt.type === 'lend' ? 'Ghi nhận trả tiền' : 'Đánh dấu đã trả'}
-        onPrimary={() => {
-          if (!debt) return;
-          if (debt.type === 'lend') {
-            setShowPaymentModal(true);
-          } else {
-            // For borrow: mark as paid directly
-            markDebtPaid(debt.id)
-              .then(() => {
-                toast.success('Đã đánh dấu đã trả');
-                onClose();
-                onSuccess();
-              })
-              .catch(e => toast.error(unwrapError(e)));
-          }
-        }}
+        primaryLabel={hasRemaining ? (debt.type === 'lend' ? 'Ghi nhận thu tiền' : 'Ghi nhận trả nợ') : undefined}
+        onPrimary={hasRemaining ? () => setShowPaymentModal(true) : undefined}
         secondaryLabel="Xóa"
         onSecondary={() => setConfirmDelete(true)}
       >
@@ -146,9 +134,15 @@ export function DebtDetailModal({ open, onClose, onSuccess, debt }: Props) {
               <div className="space-y-2">
                 {payments.map(p => (
                   <div key={p.id} className="flex items-center justify-between rounded-btn bg-ink-50 p-2 text-sm dark:bg-ink-800">
-                    <span>{formatDate(p.payment_date)}</span>
-                    <span className="font-medium text-green-600 dark:text-green-400">
-                      +{formatVND(p.amount)}
+                    <span
+                      className={clsx(
+                        'font-medium',
+                        debt.type === 'lend'
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-orange-600 dark:text-orange-400',
+                      )}
+                    >
+                      {debt.type === 'lend' ? '+' : '-'}{formatVND(p.amount)}
                     </span>
                   </div>
                 ))}

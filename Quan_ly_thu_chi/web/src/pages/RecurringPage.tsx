@@ -14,10 +14,14 @@ import {
   listAccounts,
   listCategories,
   listRecurring,
+  listPendingRecurringTransactions,
   materializeRecurring,
+  confirmRecurringTransaction,
+  skipRecurringTransaction,
   updateRecurring,
 } from '../lib/api';
 import { formatDate, formatVND } from '../lib/format';
+import { computeNextOccurrences } from '../lib/recurringSchedule';
 import { resolveCategory } from '../lib/categoryResolve';
 import {
   RECURRING_FREQ_LABEL,
@@ -30,6 +34,7 @@ import type {
   FinancialAccount,
   RecurringFrequency,
   RecurringRule,
+  Transaction,
 } from '../lib/types';
 
 const FREQS: RecurringFrequency[] = ['daily', 'weekly', 'biweekly', 'monthly', 'quarterly', 'yearly'];
@@ -74,19 +79,22 @@ export function RecurringPage() {
   const [formErrors, setFormErrors] = useState<{ name?: string; amount?: string }>({});
   const [form, setForm] = useState<Form>(EMPTY);
   const [running, setRunning] = useState(false);
+  const [pendingTransactions, setPendingTransactions] = useState<Transaction[]>([]);
 
   async function load() {
     setLoading(true);
     setErr(null);
     try {
-      const [r, a, c] = await Promise.all([
+      const [r, a, c, pending] = await Promise.all([
         listRecurring(),
         listAccounts(),
         listCategories(),
+        listPendingRecurringTransactions(),
       ]);
       setItems(r);
       setAccounts(a);
       setCategories(c);
+      setPendingTransactions(pending);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -176,12 +184,32 @@ export function RecurringPage() {
     setRunning(true);
     try {
       const created = await materializeRecurring();
-      toast.push('success', `Đã sinh ${created} giao dịch`);
+      toast.push('success', `Đã tạo ${created} khoản chờ xác nhận`);
       load();
     } catch (e) {
       toast.push('error', e instanceof Error ? e.message : String(e));
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function confirmPending(transactionId: string) {
+    try {
+      await confirmRecurringTransaction(transactionId);
+      toast.push('success', 'Đã xác nhận giao dịch định kỳ và ghi sổ');
+      load();
+    } catch (e) {
+      toast.push('error', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function skipPending(transactionId: string) {
+    try {
+      await skipRecurringTransaction(transactionId);
+      toast.push('success', 'Đã bỏ qua kỳ định kỳ');
+      load();
+    } catch (e) {
+      toast.push('error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -200,7 +228,7 @@ export function RecurringPage() {
             Giao dịch định kỳ
           </h1>
           <p className="mt-1 text-sm text-ink-500 dark:text-inkDark-500">
-            Tự động sinh giao dịch khi đến hạn. Có thể chạy thủ công bất kỳ lúc nào.
+            Quản lý các khoản thu chi lặp lại (lương, thuê nhà, hoá đơn...). Bấm &quot;Ghi nhận đến hạn&quot; để sinh giao dịch khi tới kỳ.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -219,7 +247,7 @@ export function RecurringPage() {
             disabled={running}
           >
             {running ? <Spinner size="sm" /> : <Repeat size={14} strokeWidth={1.75} />}
-            {running ? 'Đang chạy…' : 'Sinh ngay'}
+            {running ? 'Đang xử lý…' : 'Ghi nhận đến hạn'}
           </button>
           <button className="btn-primary inline-flex items-center gap-1.5" onClick={openCreate}>
             <Plus size={16} strokeWidth={2.25} /> Thêm quy tắc
@@ -228,6 +256,43 @@ export function RecurringPage() {
       </header>
 
       {err && <ErrorState message={err} onRetry={load} />}
+
+      {!loading && pendingTransactions.length > 0 && (
+        <section className="card border-brand-200 bg-brand-50/40 p-4 dark:border-brand-800/50 dark:bg-brand-950/20" aria-label="Khoản định kỳ chờ xác nhận">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-ink-900 dark:text-inkDark-900">
+                Đến hạn — chờ xác nhận ({pendingTransactions.length})
+              </h2>
+              <p className="mt-0.5 text-xs text-ink-600 dark:text-inkDark-400">
+                Chỉ bấm ghi sổ sau khi khoản thu/chi thực tế đã phát sinh.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 space-y-2">
+            {pendingTransactions.map(transaction => (
+              <div key={transaction.id} className="flex flex-wrap items-center justify-between gap-2 rounded-btn bg-surface px-3 py-2 dark:bg-surface-dark">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-ink-900 dark:text-inkDark-900">
+                    {transaction.payee || transaction.note || 'Giao dịch định kỳ'}
+                  </div>
+                  <div className="text-xs text-ink-500 dark:text-inkDark-400">
+                    {formatDate(transaction.occurred_at)} · {transaction.type === 'income' ? '+' : '−'}{formatVND(transaction.amount_minor)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button className="btn-secondary !px-2.5 !py-1.5 text-xs" onClick={() => skipPending(transaction.id)}>
+                    Bỏ qua
+                  </button>
+                  <button className="btn-primary !px-2.5 !py-1.5 text-xs" onClick={() => confirmPending(transaction.id)}>
+                    Ghi sổ
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {loading ? (
         <Skeleton className="h-40" />
@@ -292,6 +357,28 @@ export function RecurringPage() {
                         </>
                       )}
                     </div>
+                    {r.status === 'active' && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-2xs text-ink-500 dark:text-inkDark-400">
+                        <span className="font-medium text-brand-600 dark:text-brand-400">3 kỳ tới:</span>
+                        {computeNextOccurrences(
+                          {
+                            frequency: r.frequency,
+                            start_date: r.start_date,
+                            day_of_month: r.day_of_month,
+                            end_date: r.end_date,
+                          },
+                          3,
+                          r.next_occurrence?.slice(0, 10),
+                        ).map((d, idx) => (
+                          <span
+                            key={idx}
+                            className="rounded bg-ink-100/70 px-1.5 py-0.5 font-mono dark:bg-inkDark-800"
+                          >
+                            {formatDate(d)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -338,7 +425,7 @@ export function RecurringPage() {
         open={openForm}
         onClose={() => (submitting ? null : setOpenForm(false))}
         title={form.id ? 'Sửa quy tắc' : 'Thêm quy tắc định kỳ'}
-        description="Quy tắc sẽ sinh giao dịch khi đến hạn."
+        description="Quy tắc định kỳ tự động tính toán các kỳ tiếp theo và kẹp ngày cuối tháng chuẩn xác (ví dụ ngày 31)."
         size="lg"
         footer={
           <>
@@ -447,6 +534,32 @@ export function RecurringPage() {
               />
             </FormField>
           </div>
+
+          {form.start_date && (
+            <div className="rounded-card border border-brand-200 bg-brand-50/50 p-3 text-xs dark:border-brand-800/40 dark:bg-brand-900/10">
+              <div className="font-semibold text-brand-900 dark:text-brand-300 flex items-center gap-1.5">
+                <Repeat size={13} className="shrink-0 text-brand-600 dark:text-brand-400" />
+                Xem trước 3 kỳ đến hạn tiếp theo:
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {computeNextOccurrences(
+                  {
+                    frequency: form.frequency,
+                    start_date: form.start_date,
+                    day_of_month: form.day_of_month ? Number(form.day_of_month) : null,
+                  },
+                  3,
+                ).map((d, idx) => (
+                  <span
+                    key={idx}
+                    className="rounded bg-surface px-2 py-0.5 text-xs font-semibold tabular-nums text-brand-700 shadow-sm dark:bg-surface-dark dark:text-brand-300"
+                  >
+                    Kỳ {idx + 1}: {formatDate(d)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <FormField label="Danh mục">
             <select
               className="input"

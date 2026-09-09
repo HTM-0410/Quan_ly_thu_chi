@@ -70,13 +70,8 @@ export function ReceiptDropzone({
     [images, onChange],
   );
 
-  // Cleanup object URLs khi unmount.
-  useEffect(() => {
-    return () => {
-      images.forEach(i => URL.revokeObjectURL(i.previewUrl));
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Lưu ý: previewUrl được quản lý lifecycle bởi component cha (ReceiptImportModal / BillOcrModal)
+  // khi đóng modal hoặc unmount cha, tránh bị revoke khi chuyển step trong modal.
 
   // Paste từ clipboard.
   useEffect(() => {

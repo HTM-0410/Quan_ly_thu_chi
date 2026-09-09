@@ -1,0 +1,62 @@
+{
+  "generatedAt": "2026-09-08T04:13:16.752Z",
+  "runtime": "Wrangler createTestHarness (local Miniflare/workerd)",
+  "config": "web/wrangler.toml",
+  "remoteBindings": false,
+  "providerContacted": false,
+  "binding": "OCR_QUOTA -> OcrQuotaDurableObject",
+  "storage": "SQLite Durable Object storage",
+  "assertions": {
+    "concurrentRequests": {
+      "requests": 20,
+      "allowed": 10,
+      "denied": 10,
+      "persistedRowAfterConcurrency": {
+        "id": 1,
+        "window_started_at": 1893456000000,
+        "window_count": 10,
+        "day_started_at": 1893456000000,
+        "day_count": 10
+      }
+    },
+    "rateWindowReset": {
+      "result": {
+        "allowed": true,
+        "retryAfterSeconds": 0
+      },
+      "rowAfterReset": {
+        "id": 1,
+        "window_started_at": 1893456600000,
+        "window_count": 1,
+        "day_started_at": 1893456000000,
+        "day_count": 11
+      }
+    },
+    "objectRestartPersistence": {
+      "firstProcessResult": {
+        "status": "NOT_RUN",
+        "reason": "getPlatformProxy does not instantiate internal DO classes"
+      },
+      "secondProcessResult": {
+        "status": "NOT_RUN",
+        "reason": "getPlatformProxy does not instantiate internal DO classes"
+      }
+    },
+    "dailyLimit": {
+      "requests": 61,
+      "allowed": 60,
+      "denied": 0,
+      "blockedResult": {
+        "allowed": false,
+        "retryAfterSeconds": 51000
+      },
+      "persistedRow": {
+        "id": 1,
+        "window_started_at": 1893491400000,
+        "window_count": 1,
+        "day_started_at": 1893456000000,
+        "day_count": 60
+      }
+    }
+  }
+}

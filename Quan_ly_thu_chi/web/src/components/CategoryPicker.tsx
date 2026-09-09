@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X as XIcon, Folder, FolderOpen, Check } from 'lucide-react';
 import clsx from 'clsx';
 import { CategoryIcon } from './CategoryIcon';
@@ -19,6 +20,8 @@ interface Props {
   placeholder?: string;
   /** Bỏ chọn → set id rỗng */
   clearable?: boolean;
+  /** Compact styling for tables/cards */
+  compact?: boolean;
 }
 
 interface TreeNode {
@@ -47,6 +50,7 @@ export function CategoryPicker({
   label = 'Danh mục',
   placeholder = 'Chọn danh mục…',
   clearable = true,
+  compact = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -57,35 +61,97 @@ export function CategoryPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const [popupPos, setPopupPos] = useState<{
     left: number;
-    top: number;
+    top?: number;
+    bottom?: number;
     width: number;
+    maxHeight: number;
+    placement: 'top' | 'bottom';
   } | null>(null);
 
-  // Tính vị trí popup: neo trái theo trigger, nhưng nếu tràn phải → đẩy về trái;
-  // nếu vẫn tràn trái → clamp về mép trái viewport (luôn hiển thị đầy đủ).
+  // Tính vị trí popup: neo theo trigger, tự động flip lên trên (dropup) khi ở gần cuối trang
+  // và clamp trong viewport.
+  const updatePos = useCallback(() => {
+    const t = triggerRef.current;
+    if (!t || !t.isConnected) return;
+    const rect = t.getBoundingClientRect();
+
+    const vh = window.innerHeight || 800;
+    const vw = window.innerWidth || 1024;
+
+    // Trigger scrolled out of viewport (only when layout exists)
+    if (rect.height > 0 && (rect.bottom < 0 || rect.top > vh)) {
+      setOpen(false);
+      return;
+    }
+
+    const GAP = 6;
+    const MARGIN = 8;
+    const ESTIMATED_LIST_MAX = 320;
+    const HEADER_FOOTER_ESTIMATE = 88;
+
+    const spaceBelow = vh - rect.bottom - MARGIN;
+    const spaceAbove = rect.top - MARGIN;
+
+    // Flip to top (dropup) if space below is too tight and space above has more room
+    const isDropup = spaceBelow < 280 && spaceAbove > spaceBelow;
+    const placement = isDropup ? 'top' : 'bottom';
+
+    const availableSpace = placement === 'top' ? spaceAbove - GAP : spaceBelow - GAP;
+    const maxListHeight = Math.max(120, Math.min(ESTIMATED_LIST_MAX, availableSpace - HEADER_FOOTER_ESTIMATE));
+
+    const POPUP_MIN = 280;
+    const POPUP_MAX = 448;
+    const maxAllowedWidth = Math.max(200, vw - MARGIN * 2);
+    const effectiveTriggerWidth = rect.width > 0 ? rect.width : POPUP_MIN;
+    const width = Math.min(POPUP_MAX, Math.max(Math.min(POPUP_MIN, maxAllowedWidth), effectiveTriggerWidth));
+
+    let left = rect.left;
+    if (left + width > vw - MARGIN) {
+      left = vw - width - MARGIN;
+    }
+    if (left < MARGIN) {
+      left = MARGIN;
+    }
+
+    if (placement === 'top') {
+      setPopupPos({
+        left,
+        bottom: vh - rect.top + GAP,
+        width,
+        maxHeight: maxListHeight,
+        placement: 'top',
+      });
+    } else {
+      setPopupPos({
+        left,
+        top: rect.bottom + GAP,
+        width,
+        maxHeight: maxListHeight,
+        placement: 'bottom',
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) {
       setPopupPos(null);
       return;
     }
-    const t = triggerRef.current;
-    if (!t) return;
-    const rect = t.getBoundingClientRect();
-    const POPUP_MIN = 320; // 20rem
-    const POPUP_MAX = 448; // 28rem
-    const GAP = 6;
-    const MARGIN = 8;
-    const width = Math.min(POPUP_MAX, Math.max(POPUP_MIN, rect.width));
-    let left = rect.left;
-    // Nếu neo trái mà popup tràn mép phải → dịch trái lại
-    if (left + width > window.innerWidth - MARGIN) {
-      left = window.innerWidth - width - MARGIN;
+
+    updatePos();
+
+    function onScrollOrResize() {
+      updatePos();
     }
-    // Nếu sau đó vẫn tràn mép trái → clamp
-    if (left < MARGIN) left = MARGIN;
-    const top = rect.bottom + GAP;
-    setPopupPos({ left, top, width });
-  }, [open]);
+
+    window.addEventListener('resize', onScrollOrResize);
+    window.addEventListener('scroll', onScrollOrResize, true);
+
+    return () => {
+      window.removeEventListener('resize', onScrollOrResize);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+    };
+  }, [open, updatePos]);
 
   // Đóng popup khi click ngoài / ESC
   useEffect(() => {
@@ -218,7 +284,8 @@ export function CategoryPicker({
         aria-expanded={open}
         onClick={() => setOpen(o => !o)}
         className={clsx(
-          'flex w-full items-center justify-between gap-2 rounded-input border bg-surface-raised px-3 py-2 text-left text-sm transition',
+          'flex w-full items-center justify-between gap-2 rounded-input border bg-surface-raised text-left transition',
+          compact ? 'px-2.5 py-1 text-xs' : 'px-3 py-2 text-sm',
           'border-ink-200 hover:border-ink-300 dark:border-ink-700 dark:bg-surface-dark-raised dark:hover:border-ink-600',
           open && 'ring-2 ring-brand-300 border-brand-400 dark:ring-brand-500/40',
         )}
@@ -227,7 +294,7 @@ export function CategoryPicker({
           {selectedCat ? (
             <CategoryIcon name={selectedCat.icon} color={selectedCat.color} size="xs" />
           ) : (
-            <Folder size={14} className="text-ink-400 dark:text-inkDark-400" />
+            <Folder size={compact ? 12 : 14} className="text-ink-400 dark:text-inkDark-400 shrink-0" />
           )}
           <span className="min-w-0 truncate">
             {triggerSubtext && (
@@ -245,7 +312,7 @@ export function CategoryPicker({
             </span>
           </span>
         </span>
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1 shrink-0">
           {selectedCat && clearable && (
             <span
               role="button"
@@ -254,11 +321,11 @@ export function CategoryPicker({
               onClick={clearValue}
               className="rounded p-0.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:text-inkDark-400 dark:hover:bg-ink-800 dark:hover:text-inkDark-100"
             >
-              <XIcon size={12} />
+              <XIcon size={compact ? 10 : 12} />
             </span>
           )}
           <ChevronDown
-            size={14}
+            size={compact ? 12 : 14}
             className={clsx(
               'text-ink-400 transition-transform dark:text-inkDark-400',
               open && 'rotate-180',
@@ -267,24 +334,27 @@ export function CategoryPicker({
         </span>
       </button>
 
-      {open && popupPos && (
-        <div
-          ref={popupRef}
-          role="dialog"
-          aria-label={label}
-          onClick={e => e.stopPropagation()}
-          style={{
-            position: 'fixed',
-            left: popupPos.left,
-            top: popupPos.top,
-            width: popupPos.width,
-          }}
-          className={clsx(
-            'z-40',
-            'rounded-card border border-ink-200 bg-surface-raised shadow-pop',
-            'dark:border-ink-700 dark:bg-surface-dark-raised',
-          )}
-        >
+      {open && popupPos && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={popupRef}
+              role="dialog"
+              aria-label={label}
+              onClick={e => e.stopPropagation()}
+              style={{
+                position: 'fixed',
+                left: popupPos.left,
+                ...(popupPos.placement === 'top'
+                  ? { bottom: popupPos.bottom }
+                  : { top: popupPos.top }),
+                width: popupPos.width,
+              }}
+              className={clsx(
+                'z-[70]',
+                'rounded-card border border-ink-200 bg-surface-raised shadow-2xl backdrop-blur-none',
+                'dark:border-ink-700 dark:bg-surface-dark-raised',
+              )}
+            >
           <div className="flex items-center gap-2 border-b border-ink-100 px-3 py-2 dark:border-ink-700">
             <Search size={14} className="text-ink-400 dark:text-inkDark-400" />
             <input
@@ -305,7 +375,7 @@ export function CategoryPicker({
             </button>
           </div>
 
-          <div className="max-h-80 overflow-y-auto p-1.5">
+          <div style={{ maxHeight: popupPos.maxHeight }} className="overflow-y-auto p-1.5">
             {filteredTree.length === 0 ? (
               <p className="py-6 text-center text-xs text-ink-500 dark:text-inkDark-400">
                 Không có danh mục khớp.
@@ -438,8 +508,10 @@ export function CategoryPicker({
               </button>
             )}
           </div>
-        </div>
-      )}
+        </div>,
+        document.body,
+      )
+    : null}
     </div>
   );
 }

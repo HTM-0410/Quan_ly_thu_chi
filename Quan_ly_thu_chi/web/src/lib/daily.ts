@@ -67,7 +67,8 @@ export function localDateKeyFromTz(utcIso: string, timezone: string): string {
 /**
  * Nhóm transactions theo ngày local (theo `timezone` IANA),
  * gom riêng expense (`amount_minor`) và income (`income_minor`).
- * Bỏ qua giao dịch `status='voided'`.
+ * Chỉ tính giao dịch đã ghi sổ (`status='posted'`). Pending/voided vẫn được
+ * xem trong history nhưng không làm thay đổi heatmap và KPI thực tế.
  * Trả về Map<date, DailyExpense> đã sort theo date asc.
  * Filter out 'invalid' keys from malformed timestamps.
  */
@@ -77,7 +78,8 @@ export function groupByDay(
 ): Map<string, DailyExpense> {
   const map = new Map<string, DailyExpense>();
   for (const t of transactions) {
-    if (t.status === 'voided') continue;
+    if (t.status !== 'posted') continue;
+    if (t.metadata?.is_debt_principal === true || t.metadata?.is_debt_principal === 'true') continue;
     const key = localDateKeyFromTz(t.occurred_at, timezone);
     if (key === 'invalid') continue;
     const existing = map.get(key);
