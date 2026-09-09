@@ -236,4 +236,24 @@ describe('ReportsPage (V1-04 / F06, F20)', () => {
       expect(screen.getByText('Tạp hóa vỉa hè')).toBeInTheDocument();
     });
   });
+
+  it('Chuyển đổi mốc thời gian riêng cho Chi tiêu theo danh mục cập nhật độc lập', async () => {
+    renderReports();
+
+    await waitFor(() => {
+      expect(screen.getByText('Tháng hiện tại')).toBeInTheDocument();
+    });
+
+    // Ban đầu là 12 tháng gần nhất
+    expect(screen.getByText(/Chi tiêu theo danh mục \(12 tháng gần nhất\)/)).toBeInTheDocument();
+
+    // Click chọn mốc 'Tháng hiện tại' trên thẻ danh mục
+    fireEvent.click(screen.getByText('Tháng hiện tại'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Chi tiêu theo danh mục \(Tháng này\)/)).toBeInTheDocument();
+      // Biểu đồ tổng quan phía trên vẫn giữ nguyên 12 tháng gần nhất
+      expect(screen.getByText('Tình hình chi 12 tháng gần nhất')).toBeInTheDocument();
+    });
+  });
 });

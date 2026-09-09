@@ -221,6 +221,14 @@ function bucketRange(range: RangeState): { label: string; start: string; end: st
 
 const COLORS = ['#1E88E5', '#43A047', '#E53935', '#FB8C00', '#8E24AA', '#00897B', '#5E35B1', '#3949AB'];
 
+const CAT_PRESET_OPTIONS: { preset: RangePreset; label: string }[] = [
+  { preset: 'current', label: 'Tháng hiện tại' },
+  { preset: 'month', label: '12 tháng' },
+  { preset: 'quarter', label: '4 quý' },
+  { preset: 'year', label: '5 năm' },
+  { preset: 'custom', label: 'Tùy chọn ngày' },
+];
+
 export interface PieCategoryItem {
   name: string;
   categoryId: string;
@@ -245,12 +253,22 @@ export function ReportsPage() {
     [rangePreset, today, customStart, customEnd],
   );
 
+  // Mốc thời gian riêng cho Chi tiêu theo danh mục
+  const [catPreset, setCatPreset] = useState<RangePreset>('month');
+  const [catCustomStart, setCatCustomStart] = useState<string>('');
+  const [catCustomEnd, setCatCustomEnd] = useState<string>('');
+  const catRange: RangeState = useMemo(
+    () => deriveRange(catPreset, today, catCustomStart, catCustomEnd),
+    [catPreset, today, catCustomStart, catCustomEnd],
+  );
+  const [catLoading, setCatLoading] = useState(false);
+
   const [income, setIncome] = useState<number>(0);
   const [expense, setExpense] = useState<number>(0);
   const [history, setHistory] = useState<MonthBucket[]>([]);
   const [byCategory, setByCategory] = useState<PieCategoryItem[]>([]);
-  // Giao dịch trong khoảng range đã chọn (để phục vụ drilldown popup khi click pie).
-  const [rangeTxs, setRangeTxs] = useState<Transaction[]>([]);
+  // Giao dịch trong khoảng range của danh mục (để phục vụ drilldown popup khi click pie).
+  const [catRangeTxs, setCatRangeTxs] = useState<Transaction[]>([]);
   const [heatmapData, setHeatmapData] = useState<Map<string, DailyExpense>>(new Map());
   const [heatmapTxs, setHeatmapTxs] = useState<Map<string, Transaction[]>>(new Map());
   const [heatmapLoading, setHeatmapLoading] = useState(false);
@@ -281,30 +299,22 @@ export function ReportsPage() {
    * Load thu/chi theo range đang chọn.
    * Đồng bộ hoàn toàn KPI, BarChart, và PieChart cùng khoảng thời gian [range.start, range.end].
    */
+  /**
+   * Load thu/chi theo range đang chọn.
+   * Đồng bộ KPI và BarChart cùng khoảng thời gian [range.start, range.end].
+   */
   async function load() {
     setLoading(true);
     setErr(null);
     try {
-      const [sum, cats, rawBreakdown, hist, txs] = await Promise.all([
+      const [sum, cats, hist] = await Promise.all([
         getTransactionsSummary({
           start_date: range.start,
           end_date: range.end,
           timezone,
         }),
         listCategories(),
-        getCategoryExpensesBreakdown({
-          start_date: range.start,
-          end_date: range.end,
-          timezone,
-        }),
         loadHistory(range),
-        // Lấy transactions cho drill-down modal trong range đã chọn
-        listTransactions({
-          from: `${range.start}T00:00:00Z`,
-          to: `${range.end}T23:59:59Z`,
-          type: 'expense',
-          limit: 1000,
-        }),
       ]);
 
       const totalInc = Number(sum?.total_income ?? 0);
@@ -313,9 +323,42 @@ export function ReportsPage() {
       setExpense(totalExp);
       setHistory(hist);
       setCategories(cats);
-      setRangeTxs(txs as Transaction[]);
 
-      // Xử lý PieChart: Phân bổ Top 7 danh mục, nhóm Chưa phân loại và nhóm Khác (F06)
+      // Đồng bộ Heatmap anchor nếu tháng hiện tại nằm ngoài range
+      const rangeStartDate = parseYmd(range.start);
+      const rangeEndDate = parseYmd(range.end);
+      if (heatmapAnchor < startOfMonth(rangeStartDate) || heatmapAnchor > endOfMonth(rangeEndDate)) {
+        setHeatmapAnchor(startOfMonth(rangeEndDate));
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * Load phân bổ chi tiêu theo danh mục (PieChart & Drill-down modal) theo catRange.
+   */
+  async function loadCategoryBreakdown(cr: RangeState) {
+    setCatLoading(true);
+    try {
+      const [rawBreakdown, txs] = await Promise.all([
+        getCategoryExpensesBreakdown({
+          start_date: cr.start,
+          end_date: cr.end,
+          timezone,
+        }),
+        listTransactions({
+          from: `${cr.start}T00:00:00Z`,
+          to: `${cr.end}T23:59:59Z`,
+          type: 'expense',
+          limit: 1000,
+        }),
+      ]);
+
+      setCatRangeTxs(txs as Transaction[]);
+
       const totalExpenseBreakdown = rawBreakdown.reduce((acc, item) => acc + item.total_amount, 0);
 
       // Tách mục chưa phân loại nếu có
@@ -330,7 +373,7 @@ export function ReportsPage() {
 
       // 1. Thêm các danh mục Top 7
       topCategorized.forEach((c, idx) => {
-        const pct = totalExp > 0 ? (c.total_amount / totalExp) * 100 : 0;
+        const pct = totalExpenseBreakdown > 0 ? (c.total_amount / totalExpenseBreakdown) * 100 : 0;
         pieList.push({
           name: c.category_name,
           categoryId: c.category_id,
@@ -343,7 +386,7 @@ export function ReportsPage() {
 
       // 2. Thêm nhóm "Chưa phân loại" nếu có chi tiêu chưa gắn danh mục
       if (uncategorizedItem && uncategorizedItem.total_amount > 0) {
-        const pct = totalExp > 0 ? (uncategorizedItem.total_amount / totalExp) * 100 : 0;
+        const pct = totalExpenseBreakdown > 0 ? (uncategorizedItem.total_amount / totalExpenseBreakdown) * 100 : 0;
         pieList.push({
           name: 'Chưa phân loại',
           categoryId: '__uncategorized__',
@@ -358,7 +401,7 @@ export function ReportsPage() {
       if (remainingCategorized.length > 0) {
         const otherAmount = remainingCategorized.reduce((acc, item) => acc + item.total_amount, 0);
         const otherCount = remainingCategorized.reduce((acc, item) => acc + item.transaction_count, 0);
-        const pct = totalExp > 0 ? (otherAmount / totalExp) * 100 : 0;
+        const pct = totalExpenseBreakdown > 0 ? (otherAmount / totalExpenseBreakdown) * 100 : 0;
         pieList.push({
           name: 'Khác',
           categoryId: '__other__',
@@ -372,17 +415,10 @@ export function ReportsPage() {
       // Sắp xếp lại theo số tiền giảm dần
       pieList.sort((a, b) => b.amount - a.amount);
       setByCategory(pieList);
-
-      // Đồng bộ Heatmap anchor nếu tháng hiện tại nằm ngoài range
-      const rangeStartDate = parseYmd(range.start);
-      const rangeEndDate = parseYmd(range.end);
-      if (heatmapAnchor < startOfMonth(rangeStartDate) || heatmapAnchor > endOfMonth(rangeEndDate)) {
-        setHeatmapAnchor(startOfMonth(rangeEndDate));
-      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      console.error('[reports-category-breakdown]', e);
     } finally {
-      setLoading(false);
+      setCatLoading(false);
     }
   }
 
@@ -445,17 +481,39 @@ export function ReportsPage() {
   }, [range.preset, range.start, range.end, timezone]);
 
   useEffect(() => {
+    loadCategoryBreakdown(catRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catRange.preset, catRange.start, catRange.end, timezone]);
+
+  useEffect(() => {
     loadHeatmap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [heatmapAnchor, timezone]);
 
   function handlePresetChange(p: RangePreset) {
     setRangePreset(p);
+    setCatPreset(p);
     if (p === 'custom') {
       if (!customStart || !customEnd) {
         const r = deriveRange('current', today, '', '');
         setCustomStart(r.start);
         setCustomEnd(r.end);
+        setCatCustomStart(r.start);
+        setCatCustomEnd(r.end);
+      } else {
+        setCatCustomStart(customStart);
+        setCatCustomEnd(customEnd);
+      }
+    }
+  }
+
+  function handleCatPresetChange(p: RangePreset) {
+    setCatPreset(p);
+    if (p === 'custom') {
+      if (!catCustomStart || !catCustomEnd) {
+        const r = deriveRange('current', today, '', '');
+        setCatCustomStart(r.start);
+        setCatCustomEnd(r.end);
       }
     }
   }
@@ -717,13 +775,63 @@ export function ReportsPage() {
 
       {/* Biểu đồ tròn và bảng phân bổ danh mục (PieChart & Table - F06, F20) */}
       <section className="card overflow-hidden">
-        <div className="border-b border-ink-100 px-5 py-3.5 dark:border-inkDark-200">
-          <h2 className="h-display text-base font-semibold text-ink-900 dark:text-inkDark-900">
-            Chi tiêu theo danh mục ({PRESET_LABELS[range.preset]})
-          </h2>
+        <div className="border-b border-ink-100 px-4 sm:px-5 py-3.5 dark:border-inkDark-200">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="h-display text-base font-semibold text-ink-900 dark:text-inkDark-900">
+                Chi tiêu theo danh mục ({PRESET_LABELS[catPreset]})
+              </h2>
+              <p className="mt-0.5 text-2xs text-ink-500 dark:text-inkDark-400">
+                {catRange.preset === 'custom'
+                  ? `${formatDate(catRange.start)} — ${formatDate(catRange.end)}`
+                  : `Kỳ thống kê: ${formatDate(catRange.start)} — ${formatDate(catRange.end)}`}
+              </p>
+            </div>
+            {/* Bộ chọn mốc thời gian riêng cho danh mục */}
+            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-ink-200/80 bg-surface-sunken p-1 dark:border-inkDark-200 dark:bg-surface-dark-sunken">
+              {CAT_PRESET_OPTIONS.map(opt => {
+                const active = catPreset === opt.preset;
+                return (
+                  <button
+                    key={opt.preset}
+                    type="button"
+                    onClick={() => handleCatPresetChange(opt.preset)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      active
+                        ? 'bg-surface-raised text-brand-600 shadow-2xs dark:bg-surface-dark-raised dark:text-brand-400'
+                        : 'text-ink-600 hover:text-ink-900 dark:text-inkDark-400 dark:hover:text-inkDark-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {catPreset === 'custom' && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 pt-2.5 border-t border-ink-100 dark:border-inkDark-200 text-xs">
+              <span className="text-ink-600 dark:text-inkDark-400 font-medium">Khoảng ngày:</span>
+              <input
+                type="date"
+                value={catCustomStart}
+                max={catCustomEnd || undefined}
+                onChange={e => setCatCustomStart(e.target.value)}
+                className="rounded-btn border border-ink-200 bg-surface-raised px-2.5 py-1 text-xs text-ink-900 dark:border-inkDark-200 dark:bg-surface-dark-raised dark:text-inkDark-900 focus:border-brand-500 focus:outline-none"
+              />
+              <span className="text-ink-400 dark:text-inkDark-500">→</span>
+              <input
+                type="date"
+                value={catCustomEnd}
+                min={catCustomStart || undefined}
+                onChange={e => setCatCustomEnd(e.target.value)}
+                className="rounded-btn border border-ink-200 bg-surface-raised px-2.5 py-1 text-xs text-ink-900 dark:border-inkDark-200 dark:bg-surface-dark-raised dark:text-inkDark-900 focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+          )}
         </div>
-        <div className="p-5">
-          {loading ? (
+        <div className="p-4 sm:p-5">
+          {catLoading ? (
             <Skeleton className="h-72" />
           ) : byCategory.length === 0 ? (
             <div className="rounded-card border border-dashed border-ink-200 bg-surface-sunken px-6 py-10 text-center text-sm text-ink-500 dark:border-inkDark-200 dark:bg-surface-dark-sunken dark:text-inkDark-400">
@@ -867,14 +975,14 @@ export function ReportsPage() {
         open={catModal !== null}
         onClose={() => setCatModal(null)}
         title={catModal ? `Giao dịch — ${catModal.name}` : 'Giao dịch'}
-        description={`Các giao dịch thuộc danh mục này trong khoảng thời gian đã chọn (${formatDate(range.start)} – ${formatDate(range.end)}).`}
+        description={`Các giao dịch thuộc danh mục này trong khoảng thời gian đã chọn (${formatDate(catRange.start)} – ${formatDate(catRange.end)}).`}
       >
         {(() => {
           if (!catModal) return null;
 
           // Lọc giao dịch chính xác cho cả danh mục thường, Chưa phân loại và Khác
-          const filtered = rangeTxs
-            .filter(t => {
+          const filtered = catRangeTxs
+            .filter((t: Transaction) => {
               const k = categoryKey(t);
               if (catModal.categoryId === '__uncategorized__') {
                 return !k;
@@ -884,9 +992,9 @@ export function ReportsPage() {
               }
               return k === catModal.categoryId;
             })
-            .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1));
+            .sort((a: Transaction, b: Transaction) => (a.occurred_at < b.occurred_at ? 1 : -1));
 
-          const total = filtered.reduce((s, t) => s + t.amount_minor, 0);
+          const total = filtered.reduce((s: number, t: Transaction) => s + t.amount_minor, 0);
 
           return (
             <div>
@@ -908,7 +1016,7 @@ export function ReportsPage() {
                 </div>
               ) : (
                 <ul className="max-h-[60vh] divide-y divide-ink-100 overflow-y-auto dark:divide-inkDark-200">
-                  {filtered.map(t => (
+                  {filtered.map((t: Transaction) => (
                     <li key={t.id} className="flex items-start justify-between gap-3 px-1 py-2.5">
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium text-ink-900 dark:text-inkDark-900">
